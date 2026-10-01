@@ -73,16 +73,27 @@ html, body {
   height: calc(100% - 34px);
 }
 
-/* lateral de pastas: desliza ao abrir e fechar */
+/* lateral de pastas: desliza ao abrir e fechar, e a largura é ajustável */
 #lateral {
-  width: 240px;
-  min-width: 240px;
+  --largura: 240px;
+  width: var(--largura);
+  min-width: var(--largura);
   background: var(--fundo-2);
   border-right: 1px solid var(--borda);
   overflow-y: auto;
   transition: margin-left 0.18s ease;
 }
-#lateral.fechada { margin-left: -241px; }
+#lateral.fechada { margin-left: calc(-1 * var(--largura) - 1px); }
+#lateral.arrastando { transition: none; }
+
+#divisor-lateral {
+  width: 5px;
+  flex: none;
+  background: var(--fundo-2);
+  border-right: 1px solid var(--borda);
+  cursor: col-resize;
+}
+#divisor-lateral:hover { background: #2e2e2e; }
 
 #raiz-nome {
   padding: 8px 12px;

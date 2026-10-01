@@ -210,6 +210,30 @@ async function salvar() {
 $('btn-salvar').addEventListener('click', salvar);
 
 // ============================================================
+// DIVISOR da lateral (largura das pastas)
+// ============================================================
+
+$('divisor-lateral').addEventListener('mousedown', (evInicio) => {
+  evInicio.preventDefault();
+  const lateral = $('lateral');
+  const larguraInicio = lateral.getBoundingClientRect().width;
+  const xInicio = evInicio.clientX;
+  lateral.classList.add('arrastando'); // sem deslize durante o arrasto
+
+  function mover(ev) {
+    const nova = Math.min(500, Math.max(140, larguraInicio + ev.clientX - xInicio));
+    lateral.style.setProperty('--largura', nova + 'px');
+  }
+  function soltar() {
+    lateral.classList.remove('arrastando');
+    window.removeEventListener('mousemove', mover);
+    window.removeEventListener('mouseup', soltar);
+  }
+  window.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', soltar);
+});
+
+// ============================================================
 // DIVISOR entre editor e terminal
 // ============================================================
 
