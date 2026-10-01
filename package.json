@@ -1,5 +1,5 @@
 {
-  "name": "meu-terminal",
+  "name": "bigorna",
   "version": "1.0.0",
   "description": "Terminal com editor, pastas e (depois) joguinhos",
   "main": "main.js",
@@ -9,7 +9,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",

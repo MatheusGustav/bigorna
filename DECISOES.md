@@ -1,4 +1,4 @@
-# Meu Terminal — decisões alinhadas
+# Bigorna — decisões alinhadas
 
 > Conversa de alinhamento com o Claude em 01/10/2026. Nada construído ainda; este arquivo guarda só o que foi decidido.
 
@@ -36,6 +36,6 @@ Fica pra depois: jogos, cores personalizadas, resto da estética.
 - Electron gasta ~300 MB de RAM; ok nos 11 GB do notebook.
 - Fonte de ícones (Nerd Font) ainda não está instalada na máquina.
 
-## Nome
+## Nome e licença
 
-"meu-terminal" é provisório, escolhido pelo Claude só pra criar a pasta. Matheus ainda vai batizar.
+**Bigorna**, batizado pelo Matheus em 01/10/2026. Licença **PolyForm Noncommercial 1.0.0** (`LICENSE.md`): qualquer um pode usar, modificar e compartilhar pra uso não comercial; uso comercial e venda só com autorização do Matheus. Não é "open source" pela definição oficial, e o GitHub mostra isso como licença "outra". Repositório público em MatheusGustav/bigorna.

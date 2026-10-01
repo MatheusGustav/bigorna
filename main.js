@@ -12,7 +12,7 @@ function criarJanela() {
     width: 1280,
     height: 760,
     backgroundColor: '#0c0c0c',
-    title: 'meu-terminal',
+    title: 'bigorna',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
