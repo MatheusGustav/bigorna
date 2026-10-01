@@ -17,7 +17,7 @@ Um programa com janela própria que **substitui o Konsole** no dia a dia. Ele é
 |---|---|
 | Base da janela | **Electron** (mesma base do VS Code e do Cate) |
 | Caixa de terminal | **xterm.js** + node-pty (mesmas peças do VS Code; o ghostty-web é a reserva, encaixa no mesmo lugar se o xterm.js decepcionar) |
-| Atalhos | **O programa não define nenhum atalho.** Tecla nenhuma é capturada: tudo passa direto pro bash, como hoje |
+| Atalhos | **Quase nenhuma tecla é capturada: tudo passa direto pro bash.** Exceções decididas pelo Matheus: **Ctrl+J** esconde/mostra o terminal (como no VS Code; o bash perde o Ctrl+J-como-Enter só dentro do programa) e **Ctrl+Shift+C/V** copia/cola no terminal, igual ao Konsole. Ctrl+S salva, mas só com o editor em foco |
 | Aparência da 1ª versão | Preto e branco, normal. Cores ficam pra depois. Obrigatório só: **ícones de pasta/arquivo na lateral** (fonte de ícones, não emoji) |
 | Jogos garantidos | **Pac-Man e Tetris** (encaixam perfeito no estilo). Mario e outros: avaliar depois — emulador web existe, mas precisa de arquivo de cartucho próprio (questão legal) e teste de desempenho |
 

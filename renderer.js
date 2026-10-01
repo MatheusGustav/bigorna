@@ -210,6 +210,26 @@ async function salvar() {
 $('btn-salvar').addEventListener('click', salvar);
 
 // ============================================================
+// Ctrl+J esconde e mostra o terminal (única tecla que a janela
+// guarda pra ela; o bash não recebe essa — decisão do Matheus)
+// ============================================================
+
+window.addEventListener('keydown', (ev) => {
+  if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.code === 'KeyJ') {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const esconder = !$('terminal-area').hidden;
+    $('terminal-area').hidden = esconder;
+    $('divisor').hidden = esconder;
+    if (esconder) {
+      if (editor) editor.focus();
+    } else {
+      term.focus(); // o ResizeObserver reajusta o tamanho sozinho
+    }
+  }
+}, true); // "true": a janela ouve a tecla antes do terminal e do editor
+
+// ============================================================
 // DIVISOR da lateral (largura das pastas)
 // ============================================================
 
