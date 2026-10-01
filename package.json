@@ -1,0 +1,23 @@
+{
+  "name": "meu-terminal",
+  "version": "1.0.0",
+  "description": "Terminal com editor, pastas e (depois) joguinhos",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "electron ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "electron": "^44.5.1",
+    "monaco-editor": "^0.57.0",
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0"
+  }
+}

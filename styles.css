@@ -1,0 +1,180 @@
+/* Preto e branco por enquanto — as cores o Matheus define depois. */
+:root {
+  --fundo: #0c0c0c;
+  --fundo-2: #141414;
+  --borda: #2a2a2a;
+  --texto: #e8e8e8;
+  --texto-fraco: #8a8a8a;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* "hidden" vence qualquer display definido aqui (senão o display:flex ganharia) */
+[hidden] { display: none !important; }
+
+html, body {
+  height: 100%;
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+/* ---------- barra de cima ---------- */
+#barra {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  background: var(--fundo-2);
+  border-bottom: 1px solid var(--borda);
+  -webkit-app-region: drag;           /* dá pra arrastar a janela pela barra */
+}
+#barra button { -webkit-app-region: no-drag; }
+
+#btn-lateral {
+  background: none;
+  border: 1px solid var(--borda);
+  border-radius: 4px;
+  color: var(--texto);
+  padding: 4px 7px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+#btn-lateral:hover { background: #1f1f1f; }
+
+#nome-arquivo {
+  color: var(--texto-fraco);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#modificado { color: var(--texto); }
+
+#btn-salvar {
+  margin-left: auto;
+  background: var(--texto);
+  color: var(--fundo);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+#btn-salvar:disabled { background: #333; color: #777; cursor: default; }
+
+/* ---------- corpo ---------- */
+#corpo {
+  display: flex;
+  height: calc(100% - 34px);
+}
+
+/* lateral de pastas: desliza ao abrir e fechar */
+#lateral {
+  width: 240px;
+  min-width: 240px;
+  background: var(--fundo-2);
+  border-right: 1px solid var(--borda);
+  overflow-y: auto;
+  transition: margin-left 0.18s ease;
+}
+#lateral.fechada { margin-left: -241px; }
+
+#raiz-nome {
+  padding: 8px 12px;
+  color: var(--texto-fraco);
+  text-transform: lowercase;
+  letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--borda);
+}
+
+#arvore { padding: 4px 0 20px; user-select: none; }
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.item:hover { background: #1e1e1e; }
+.item.aberto-no-editor { background: #262626; }
+.item.oculto { color: var(--texto-fraco); }      /* arquivos que começam com ponto */
+.item svg { flex: none; }
+.filhos { display: none; }
+.filhos.expandida { display: block; }
+
+/* ---------- lado direito ---------- */
+#direita {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#editor-area { flex: 1; position: relative; min-height: 80px; }
+#editor { position: absolute; inset: 0; }
+
+#vazio {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--texto-fraco);
+  background: var(--fundo);
+}
+#vazio .dica { font-size: 12px; opacity: 0.7; }
+#vazio.escondido { display: none; }
+
+#divisor {
+  height: 5px;
+  background: var(--fundo-2);
+  border-top: 1px solid var(--borda);
+  border-bottom: 1px solid var(--borda);
+  cursor: row-resize;
+  flex: none;
+}
+#divisor:hover { background: #2e2e2e; }
+
+#terminal-area {
+  height: 42%;
+  min-height: 90px;
+  position: relative;
+  background: var(--fundo);
+  flex: none;
+}
+#terminal { position: absolute; inset: 0; padding: 4px 0 0 6px; }
+
+#shell-fim {
+  position: absolute;
+  inset: 0;
+  background: var(--fundo);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--texto-fraco);
+}
+#btn-reabrir {
+  background: var(--texto);
+  color: var(--fundo);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* barra de rolagem discreta */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #2e2e2e; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }

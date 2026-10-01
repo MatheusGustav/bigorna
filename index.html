@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>meu-terminal</title>
+  <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="barra">
+    <button id="btn-lateral" title="Mostrar / esconder pastas">
+      <svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M1 2h14v12H1V2zm1 1v10h3V3H2zm4 0v10h8V3H6z"/></svg>
+    </button>
+    <span id="nome-arquivo">meu-terminal</span>
+    <span id="modificado" hidden>●</span>
+    <button id="btn-salvar" disabled>salvar</button>
+  </header>
+
+  <div id="corpo">
+    <aside id="lateral">
+      <div id="raiz-nome"></div>
+      <div id="arvore"></div>
+    </aside>
+
+    <main id="direita">
+      <section id="editor-area">
+        <div id="editor"></div>
+        <div id="vazio">
+          <p>nenhum arquivo aberto</p>
+          <p class="dica">clique num arquivo da lateral</p>
+        </div>
+      </section>
+      <div id="divisor" title="Arraste pra mudar a altura do terminal"></div>
+      <section id="terminal-area">
+        <div id="terminal"></div>
+        <div id="shell-fim" hidden>
+          <p>o bash encerrou</p>
+          <button id="btn-reabrir">abrir de novo</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ordem importa: xterm antes do loader do Monaco (o loader confunde scripts UMD) -->
+  <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="node_modules/monaco-editor/min/vs/loader.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
