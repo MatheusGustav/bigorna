@@ -479,17 +479,24 @@ require.config({ paths: { vs: 'node_modules/monaco-editor/min/vs' } });
 
 let editor = null;
 let arquivoAberto = null;
-let versaoSalva = 0;
+let salvarAgendado = null; // espera da gravação automática
 
 function monacoPronto() {
   return new Promise((resolve) => require(['vs/editor/editor.main'], resolve));
 }
 
-function atualizarEstado() {
-  const sujo = editor && editor.getModel()
-    && editor.getModel().getAlternativeVersionId() !== versaoSalva;
-  $('modificado').hidden = !sujo;
-  $('btn-salvar').disabled = !sujo;
+// Gravação automática: toda mudança salva sozinha (decisão do Matheus; desfazer
+// é apagar). A espera curta junta uma sequência de teclas numa gravação só,
+// em vez de escrever no disco a cada letra.
+function agendarSalvar() {
+  clearTimeout(salvarAgendado);
+  salvarAgendado = setTimeout(salvar, 400);
+}
+
+// Grava já o que estava na espera — chamado antes de trocar ou fechar o
+// arquivo, senão a última mudança sairia de cena sem ir pro disco.
+function salvarAgora() {
+  if (salvarAgendado) salvar();
 }
 
 function avisar(texto) {
@@ -536,8 +543,7 @@ function limparVisor() {
 function abrirMidia(caminho, tipo) {
   limparVisor();
 
-  // O texto que estava no editor sai de cena, igual ao trocar de arquivo de
-  // texto: o que não foi salvo não fica guardado em lugar nenhum.
+  // O texto que estava no editor sai de cena (a automática já gravou).
   if (editor) {
     const modelo = editor.getModel();
     editor.setModel(null);
@@ -585,10 +591,11 @@ function abrirMidia(caminho, tipo) {
 
   arquivoAberto = caminho;
   $('nome-arquivo').textContent = caminho;
-  atualizarEstado(); // editor sem modelo: bolinha apagada e salvar desligado
 }
 
 async function abrirArquivo(caminho) {
+  salvarAgora(); // o arquivo que está saindo não perde a última mudança
+
   // Imagem, som, vídeo e PDF não vão pro editor de texto: abrem no visor.
   const tipo = tipoDeMidia(caminho);
   if (tipo) return abrirMidia(caminho, tipo);
@@ -612,9 +619,10 @@ async function abrirArquivo(caminho) {
       fontSize: 14,
       minimap: { enabled: false },
     });
-    // Ctrl+S salva — atalho padrão de editor, só vale com o editor em foco.
+    // Ctrl+S grava na hora, pro costume não atrapalhar — mas nem precisa:
+    // toda mudança já salva sozinha.
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, salvar);
-    editor.onDidChangeModelContent(atualizarEstado);
+    editor.onDidChangeModelContent(agendarSalvar);
   }
 
   // Se uma mídia estava na tela, sai; o editor volta pro lugar.
@@ -629,15 +637,13 @@ async function abrirArquivo(caminho) {
   if (modeloVelho) modeloVelho.dispose();
 
   arquivoAberto = caminho;
-  versaoSalva = modelo.getAlternativeVersionId();
   $('nome-arquivo').textContent = caminho;
-  atualizarEstado();
   editor.focus();
 }
 
-// Fecha o que está na tela (texto ou mídia) e volta pra tela de nenhum
-// arquivo. O que não foi salvo não fica: mesma regra de quando troca de arquivo.
+// Fecha o que está na tela (texto ou mídia) e volta pra tela de nenhum arquivo.
 function fecharArquivo() {
+  salvarAgora(); // fechar não perde a última mudança
   limparVisor();
   $('visor').hidden = true;
   if (editor) {
@@ -653,22 +659,22 @@ function fecharArquivo() {
   }
   arquivoAberto = null;
   $('nome-arquivo').textContent = 'bigorna';
-  atualizarEstado();
 }
 
 async function salvar() {
+  clearTimeout(salvarAgendado);
+  salvarAgendado = null;
   // Sem modelo é mídia no visor: salvar aqui escreveria texto em cima dela.
   if (!editor || !editor.getModel() || !arquivoAberto) return;
   try {
     await window.api.writeFile(arquivoAberto, editor.getValue());
-    versaoSalva = editor.getModel().getAlternativeVersionId();
-    atualizarEstado();
   } catch {
     avisar('não consegui salvar (permissão?)');
   }
 }
 
-$('btn-salvar').addEventListener('click', salvar);
+// Fechar a janela também não perde a última mudança.
+window.addEventListener('beforeunload', salvarAgora);
 
 // ============================================================
 // Ctrl+J esconde e mostra o terminal (única tecla que a janela
