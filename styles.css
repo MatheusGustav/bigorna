@@ -155,6 +155,14 @@ html, body {
   background: var(--fundo);
 }
 #vazio .dica { font-size: 12px; opacity: 0.7; }
+#marca {
+  width: 140px;
+  image-rendering: pixelated;   /* desenho do Minecraft: ampliar sem borrar */
+  opacity: 0.9;
+  margin-bottom: 10px;
+  -webkit-user-drag: none;
+  user-select: none;
+}
 #vazio.escondido { display: none; }
 
 #divisor {
