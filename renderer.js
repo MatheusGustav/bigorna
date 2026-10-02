@@ -1,4 +1,4 @@
-/* global Terminal, FitAddon, require, monaco */
+/* global Terminal, FitAddon, WebglAddon, require, monaco */
 
 const $ = (id) => document.getElementById(id);
 
@@ -21,6 +21,18 @@ const term = new Terminal({
 const fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
 term.open($('terminal'));
+
+// Desenho pela placa de vídeo, igual ao VS Code. Além de ser mais leve, ele
+// pinta os blocos (█ ▛ ▜) como quadrados cheios; com a letra da fonte ficava
+// um vão entre eles e o bonequinho do Claude saía listrado. Se a placa falhar,
+// o xterm volta sozinho pro desenho comum.
+try {
+  const webgl = new WebglAddon.WebglAddon();
+  webgl.onContextLoss(() => webgl.dispose());
+  term.loadAddon(webgl);
+} catch (erro) {
+  console.warn('[terminal] sem WebGL, usando o desenho comum:', erro);
+}
 
 // Nenhum atalho próprio: tudo vai pro bash. As duas únicas exceções são as
 // mesmas do Konsole: Ctrl+Shift+C copia e Ctrl+Shift+V cola.
