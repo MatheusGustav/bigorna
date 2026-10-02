@@ -149,6 +149,8 @@ async function montarPasta(dir, recipiente, nivel) {
     } else {
       if (caminho === arquivoAberto) marcarAtivo(linha);
       linha.addEventListener('click', () => {
+        // Clicar no arquivo que já está na tela fecha ele (decisão do Matheus).
+        if (caminho === arquivoAberto) return fecharArquivo();
         abrirArquivo(caminho);
         marcarAtivo(linha);
       });
@@ -631,6 +633,27 @@ async function abrirArquivo(caminho) {
   $('nome-arquivo').textContent = caminho;
   atualizarEstado();
   editor.focus();
+}
+
+// Fecha o que está na tela (texto ou mídia) e volta pra tela de nenhum
+// arquivo. O que não foi salvo não fica: mesma regra de quando troca de arquivo.
+function fecharArquivo() {
+  limparVisor();
+  $('visor').hidden = true;
+  if (editor) {
+    const modelo = editor.getModel();
+    editor.setModel(null);
+    if (modelo) modelo.dispose();
+  }
+  $('editor').classList.add('escondido');
+  $('vazio').classList.remove('escondido');
+  if (itemAtivo) {
+    itemAtivo.classList.remove('aberto-no-editor');
+    itemAtivo = null;
+  }
+  arquivoAberto = null;
+  $('nome-arquivo').textContent = 'bigorna';
+  atualizarEstado();
 }
 
 async function salvar() {
