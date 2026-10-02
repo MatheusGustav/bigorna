@@ -93,6 +93,14 @@ const TIPO_CAMINHO = 'application/x-bigorna-caminho';
 
 let itemAtivo = null;
 
+// Pastas já lidas do disco: caminho → onde os filhos dela estão na tela.
+const pastasLidas = new Map();
+// Pastas abertas na lateral, pra continuarem abertas quando a lista é relida.
+const pastasAbertas = new Set();
+
+const pastaDe = (caminho) => caminho.slice(0, caminho.lastIndexOf('/'));
+const dentroDe = (caminho, pasta) => !!caminho && (caminho === pasta || caminho.startsWith(pasta + '/'));
+
 function linhaDaArvore(caminho, nome, ehPasta, nivel) {
   const el = document.createElement('div');
   el.className = 'item' + (nome.startsWith('.') ? ' oculto' : '');
@@ -100,6 +108,7 @@ function linhaDaArvore(caminho, nome, ehPasta, nivel) {
   el.innerHTML = (ehPasta ? ICONE_PASTA : ICONE_ARQUIVO) + '<span></span>';
   el.querySelector('span').textContent = nome;
   el.title = caminho;
+  el.dados = { caminho, nome, ehPasta, nivel };
   // Arrastar leva o caminho junto, num tipo só da Bigorna: o editor e as caixas
   // de texto não reconhecem esse tipo, então só o terminal aceita.
   el.draggable = true;
@@ -110,6 +119,12 @@ function linhaDaArvore(caminho, nome, ehPasta, nivel) {
   return el;
 }
 
+function marcarAtivo(linha) {
+  if (itemAtivo) itemAtivo.classList.remove('aberto-no-editor');
+  itemAtivo = linha;
+  linha.classList.add('aberto-no-editor');
+}
+
 async function montarPasta(dir, recipiente, nivel) {
   let itens;
   try {
@@ -117,34 +132,51 @@ async function montarPasta(dir, recipiente, nivel) {
   } catch {
     return; // sem permissão de ler: deixa quieto
   }
+  const novas = document.createDocumentFragment();
+  const reabrir = [];
   for (const { name, isDir } of itens) {
     const caminho = dir.replace(/\/$/, '') + '/' + name;
     const linha = linhaDaArvore(caminho, name, isDir, nivel);
-    recipiente.appendChild(linha);
+    novas.appendChild(linha);
 
     if (isDir) {
       const filhos = document.createElement('div');
       filhos.className = 'filhos';
-      recipiente.appendChild(filhos);
-      let carregada = false;
-      linha.addEventListener('click', async () => {
-        const abrindo = !filhos.classList.contains('expandida');
-        filhos.classList.toggle('expandida', abrindo);
-        linha.firstElementChild.outerHTML = abrindo ? ICONE_PASTA_ABERTA : ICONE_PASTA;
-        if (abrindo && !carregada) {
-          carregada = true;
-          await montarPasta(caminho, filhos, nivel + 1);
-        }
-      });
+      novas.appendChild(filhos);
+      linha.dados.filhos = filhos;
+      linha.addEventListener('click', () => alternarPasta(linha, !filhos.classList.contains('expandida')));
+      if (pastasAbertas.has(caminho)) reabrir.push(linha);
     } else {
+      if (caminho === arquivoAberto) marcarAtivo(linha);
       linha.addEventListener('click', () => {
         abrirArquivo(caminho);
-        if (itemAtivo) itemAtivo.classList.remove('aberto-no-editor');
-        itemAtivo = linha;
-        linha.classList.add('aberto-no-editor');
+        marcarAtivo(linha);
       });
     }
   }
+  // Troca tudo de uma vez: relendo uma pasta, a lista não pisca vazia.
+  recipiente.replaceChildren(novas);
+  for (const linha of reabrir) await alternarPasta(linha, true);
+}
+
+async function alternarPasta(linha, abrir) {
+  const { caminho, nivel, filhos } = linha.dados;
+  filhos.classList.toggle('expandida', abrir);
+  linha.firstElementChild.outerHTML = abrir ? ICONE_PASTA_ABERTA : ICONE_PASTA;
+  if (abrir) pastasAbertas.add(caminho);
+  else pastasAbertas.delete(caminho);
+  if (abrir && !pastasLidas.has(caminho)) {
+    pastasLidas.set(caminho, { recipiente: filhos, nivel: nivel + 1 });
+    await montarPasta(caminho, filhos, nivel + 1);
+  }
+}
+
+// Relê uma pasta do disco depois de criar, renomear, apagar ou compactar.
+async function recarregarPasta(dir) {
+  const lida = pastasLidas.get(dir);
+  if (!lida) return; // ainda não foi aberta: vai ser lida quando abrir
+  for (const c of pastasLidas.keys()) if (c.startsWith(dir + '/')) pastasLidas.delete(c);
+  await montarPasta(dir, lida.recipiente, lida.nivel);
 }
 
 $('btn-lateral').addEventListener('click', () => {
@@ -189,6 +221,253 @@ $('terminal-area').addEventListener('drop', (ev) => {
   term.paste(caminhoProBash(caminho) + ' ');
   term.focus();
 }, true);
+
+// ============================================================
+// MENU DO BOTÃO DIREITO na lateral: desenhado aqui, no estilo do
+// menu do Dolphin (o do sistema não deixa mudar o tamanho)
+// ============================================================
+
+let menuAberto = null; // { raiz, sub }: o menu na tela e o submenu, se tiver
+let pedidosDeMenu = 0; // descarta resposta atrasada de um clique antigo
+
+function fecharMenu() {
+  pedidosDeMenu++;
+  document.querySelectorAll('.alvo-do-menu').forEach((el) => el.classList.remove('alvo-do-menu'));
+  if (!menuAberto) return;
+  menuAberto.raiz.remove();
+  if (menuAberto.sub) menuAberto.sub.remove();
+  menuAberto = null;
+}
+
+// Põe o menu no ponto (x, y) sem passar da borda da janela. Se não cabe à
+// direita, abre pra esquerda a partir de xEsquerda.
+function posicionar(menu, x, y, xEsquerda = x) {
+  const { width, height } = menu.getBoundingClientRect();
+  if (x + width > innerWidth - 4) x = xEsquerda - width;
+  if (y + height > innerHeight - 4) y = innerHeight - height - 4;
+  menu.style.left = Math.max(4, x) + 'px';
+  menu.style.top = Math.max(4, y) + 'px';
+}
+
+// itens: { texto, icone, acao } ou { texto, icone, submenu: [...] }; '-' é separador.
+function desenharMenu(itens, ehRaiz) {
+  const menu = document.createElement('div');
+  menu.className = 'menu';
+  menu.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  for (const item of itens) {
+    if (item === '-') {
+      menu.appendChild(Object.assign(document.createElement('div'), { className: 'menu-separador' }));
+      continue;
+    }
+    const el = document.createElement('div');
+    el.className = 'menu-item' + (item.desligado ? ' desligado' : '');
+    const icone = document.createElement(item.icone ? 'img' : 'span');
+    icone.className = 'menu-icone';
+    if (item.icone) icone.src = item.icone;
+    const texto = Object.assign(document.createElement('span'), { className: 'menu-texto', textContent: item.texto });
+    el.append(icone, texto);
+    if (item.submenu) el.appendChild(Object.assign(document.createElement('span'), { className: 'menu-seta' }));
+
+    // No menu principal, passar o mouse abre o submenu da opção (ou fecha o de outra).
+    if (ehRaiz) el.addEventListener('mouseenter', () => abrirSubmenu(item.submenu ? el : null, item.submenu));
+    el.addEventListener('click', () => {
+      if (item.desligado || item.submenu) return;
+      fecharMenu();
+      item.acao();
+    });
+    menu.appendChild(el);
+  }
+  document.body.appendChild(menu);
+  return menu;
+}
+
+function abrirSubmenu(itemPai, itens) {
+  if (menuAberto.sub) {
+    menuAberto.sub.remove();
+    menuAberto.sub = null;
+    menuAberto.raiz.querySelectorAll('.aberto').forEach((el) => el.classList.remove('aberto'));
+  }
+  if (!itens) return;
+  itemPai.classList.add('aberto');
+  menuAberto.sub = desenharMenu(itens, false);
+  const r = itemPai.getBoundingClientRect();
+  posicionar(menuAberto.sub, r.right + 4, r.top - 5, r.left - 4);
+}
+
+function itensDoMenu(linha, opcoes) {
+  const { caminho } = linha.dados;
+  const ic = opcoes.icones;
+  return [
+    {
+      texto: 'Abrir com',
+      icone: ic.abrirCom,
+      submenu: opcoes.programas.length
+        ? opcoes.programas.map((p) => ({ texto: p.nome, icone: p.icone, acao: () => window.api.abrirCom(p.arquivo, caminho) }))
+        : [{ texto: 'nenhum programa encontrado', desligado: true }],
+    },
+    '-',
+    {
+      texto: 'Criar novo',
+      icone: ic.criarNovo,
+      submenu: [
+        { texto: 'Pasta…', icone: ic.pasta, acao: () => criarNovo(linha, true) },
+        { texto: 'Arquivo vazio…', icone: ic.arquivo, acao: () => criarNovo(linha, false) },
+      ],
+    },
+    '-',
+    { texto: 'Renomear…', icone: ic.renomear, acao: () => renomear(linha) },
+    { texto: 'Mover pra lixeira', icone: ic.lixeira, acao: () => apagar(linha, 'lixeira') },
+    { texto: 'Excluir de vez…', icone: ic.excluir, acao: () => apagar(linha, 'excluir') },
+    '-',
+    { texto: 'Compactar (.zip)', icone: ic.compactar, acao: () => compactar(linha) },
+    opcoes.audio && { texto: 'Transcrever áudio', icone: ic.transcrever, acao: () => window.api.transcrever(caminho) },
+    '-',
+    { texto: 'Propriedades', icone: ic.propriedades, acao: () => window.api.propriedades(caminho) },
+  ].filter(Boolean);
+}
+
+$('arvore').addEventListener('contextmenu', async (ev) => {
+  const linha = ev.target.closest('.item');
+  if (!linha || !linha.dados || linha.querySelector('input')) return;
+  ev.preventDefault();
+  fecharMenu();
+  const pedido = pedidosDeMenu;
+  linha.classList.add('alvo-do-menu');
+  const opcoes = await window.api.opcoesDoMenu(linha.dados.caminho, linha.dados.ehPasta);
+  if (pedido !== pedidosDeMenu) return; // fechou ou clicou em outro enquanto esperava
+  menuAberto = { raiz: desenharMenu(itensDoMenu(linha, opcoes), true), sub: null };
+  posicionar(menuAberto.raiz, ev.clientX, ev.clientY);
+});
+
+// Fecha ao clicar fora, rolar fora, trocar de janela ou mudar o tamanho.
+// Com o menu aberto, Esc só fecha o menu e não chega no terminal.
+window.addEventListener('mousedown', (ev) => {
+  if (!ev.target.closest('.menu')) fecharMenu();
+}, true);
+window.addEventListener('wheel', (ev) => {
+  if (!ev.target.closest('.menu')) fecharMenu();
+}, true);
+window.addEventListener('blur', fecharMenu);
+window.addEventListener('resize', fecharMenu);
+window.addEventListener('keydown', (ev) => {
+  if (!menuAberto) return;
+  if (ev.key === 'Escape') {
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+  fecharMenu();
+}, true);
+
+async function apagar(linha, modo) {
+  const { caminho } = linha.dados;
+  const pedido = modo === 'lixeira' ? window.api.lixeira(caminho) : window.api.excluir(caminho);
+  const r = await pedido.catch(() => ({ erro: 'falhou' }));
+  if (r.cancelado) return;
+  if (r.erro) return avisar(modo === 'lixeira' ? 'não consegui mover pra lixeira' : 'não consegui excluir');
+  for (const c of [...pastasAbertas]) if (dentroDe(c, caminho)) pastasAbertas.delete(c);
+  await recarregarPasta(pastaDe(caminho));
+}
+
+async function compactar(linha) {
+  const { caminho } = linha.dados;
+  const r = await window.api.compactar(caminho).catch(() => ({ erro: 'falhou' }));
+  if (r.erro) return avisar('não consegui compactar');
+  await recarregarPasta(pastaDe(caminho));
+}
+
+// Caixa de nome na própria linha da lateral, igual ao Dolphin: Enter confirma,
+// Esc ou clicar fora cancela. Responde o nome digitado, ou null se cancelou.
+function pedirNome(linha, inicial, separarExtensao) {
+  return new Promise((resolve) => {
+    const caixa = document.createElement('input');
+    caixa.className = 'caixa-nome';
+    caixa.value = inicial;
+    caixa.spellcheck = false;
+    const arrastavel = linha.draggable;
+    linha.draggable = false; // senão selecionar o texto com o mouse arrastaria a linha
+    linha.appendChild(caixa);
+    caixa.focus();
+    // Já vem selecionado só o nome, sem a extensão, pra digitar por cima.
+    const ponto = inicial.lastIndexOf('.');
+    caixa.setSelectionRange(0, separarExtensao && ponto > 0 ? ponto : inicial.length);
+
+    let terminou = false;
+    const terminar = (nome) => {
+      if (terminou) return;
+      terminou = true;
+      caixa.remove();
+      linha.draggable = arrastavel;
+      resolve(nome);
+    };
+    caixa.addEventListener('click', (ev) => ev.stopPropagation()); // não abre/fecha a pasta
+    // Trocar de janela também tira o foco da caixa; aí ela fica esperando a volta.
+    caixa.addEventListener('blur', () => { if (document.hasFocus()) terminar(null); });
+    caixa.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') terminar(null);
+      if (ev.key !== 'Enter') return;
+      const nome = caixa.value.trim();
+      if (nome.includes('/') || nome === '.' || nome === '..') {
+        avisar('o nome não pode ter "/" nem ser "." ou ".."');
+        return;
+      }
+      terminar(nome || null);
+    });
+  });
+}
+
+async function renomear(linha) {
+  const { caminho, nome, ehPasta } = linha.dados;
+  const texto = linha.querySelector('span');
+  texto.hidden = true;
+  const novo = await pedirNome(linha, nome, !ehPasta);
+  texto.hidden = false;
+  if (!novo || novo === nome) return;
+
+  const destino = pastaDe(caminho) + '/' + novo;
+  const r = await window.api.renomear(caminho, destino).catch(() => ({ erro: 'falhou' }));
+  if (r.erro) return avisar(r.erro === 'existe' ? 'já existe um item com esse nome' : 'não consegui renomear');
+
+  // O que estava aberto continua aberto, agora com o nome novo. O editor
+  // precisa saber, senão o próximo salvar recriaria o arquivo com o nome velho.
+  for (const c of [...pastasAbertas]) {
+    if (dentroDe(c, caminho)) {
+      pastasAbertas.delete(c);
+      pastasAbertas.add(destino + c.slice(caminho.length));
+    }
+  }
+  if (dentroDe(arquivoAberto, caminho)) {
+    arquivoAberto = destino + arquivoAberto.slice(caminho.length);
+    $('nome-arquivo').textContent = arquivoAberto;
+  }
+  await recarregarPasta(pastaDe(caminho));
+}
+
+// Na pasta, cria dentro dela; no arquivo, cria na pasta onde ele está.
+async function criarNovo(linha, ehPasta) {
+  let dir, recipiente, nivel;
+  if (linha.dados.ehPasta) {
+    await alternarPasta(linha, true);
+    dir = linha.dados.caminho;
+    recipiente = linha.dados.filhos;
+    nivel = linha.dados.nivel + 1;
+  } else {
+    dir = pastaDe(linha.dados.caminho);
+    ({ recipiente, nivel } = pastasLidas.get(dir));
+  }
+
+  const provisoria = document.createElement('div');
+  provisoria.className = 'item';
+  provisoria.style.paddingLeft = 8 + nivel * 14 + 'px';
+  provisoria.innerHTML = ehPasta ? ICONE_PASTA : ICONE_ARQUIVO;
+  recipiente.prepend(provisoria);
+  const nome = await pedirNome(provisoria, '', false);
+  provisoria.remove();
+  if (!nome) return;
+
+  const r = await window.api.criar(dir + '/' + nome, ehPasta).catch(() => ({ erro: 'falhou' }));
+  if (r.erro) return avisar(r.erro === 'existe' ? 'já existe um item com esse nome' : 'não consegui criar');
+  await recarregarPasta(dir);
+}
 
 // ============================================================
 // EDITOR
@@ -342,6 +621,7 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
 (async () => {
   const casa = await window.api.home();
   $('raiz-nome').textContent = casa;
+  pastasLidas.set(casa, { recipiente: $('arvore'), nivel: 0 });
   await montarPasta(casa, $('arvore'), 0);
   await abrirShell();
 })();
