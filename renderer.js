@@ -89,6 +89,8 @@ const ICONE_PASTA = '<svg viewBox="0 0 16 16" width="14" height="14"><path fill=
 const ICONE_PASTA_ABERTA = '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M1.5 2h5l1.5 2H14a1 1 0 0 1 1 1v1H3.2a1.5 1.5 0 0 0-1.43 1.05L0 12V3.5A1.5 1.5 0 0 1 1.5 2zm1.7 5h11.6a1 1 0 0 1 .96 1.27l-1.3 4.5a1.5 1.5 0 0 1-1.44 1.08H1.6a1 1 0 0 1-.96-1.28l1.63-4.5A1.5 1.5 0 0 1 3.2 7z"/></svg>';
 const ICONE_ARQUIVO = '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M3 0h7l3 3v13H3V0zm6.5 1H4v14h8V4.5H9.5V1z" opacity=".7"/></svg>';
 
+const TIPO_CAMINHO = 'application/x-bigorna-caminho';
+
 let itemAtivo = null;
 
 function linhaDaArvore(caminho, nome, ehPasta, nivel) {
@@ -98,6 +100,13 @@ function linhaDaArvore(caminho, nome, ehPasta, nivel) {
   el.innerHTML = (ehPasta ? ICONE_PASTA : ICONE_ARQUIVO) + '<span></span>';
   el.querySelector('span').textContent = nome;
   el.title = caminho;
+  // Arrastar leva o caminho junto, num tipo só da Bigorna: o editor e as caixas
+  // de texto não reconhecem esse tipo, então só o terminal aceita.
+  el.draggable = true;
+  el.addEventListener('dragstart', (ev) => {
+    ev.dataTransfer.setData(TIPO_CAMINHO, caminho);
+    ev.dataTransfer.effectAllowed = 'copy';
+  });
   return el;
 }
 
@@ -141,6 +150,45 @@ async function montarPasta(dir, recipiente, nivel) {
 $('btn-lateral').addEventListener('click', () => {
   $('lateral').classList.toggle('fechada');
 });
+
+// ============================================================
+// SOLTAR NO TERMINAL: item da lateral vira o caminho no prompt
+// ============================================================
+
+// Igual ao Konsole: caminho só com letra comum vai como está; com espaço,
+// acento ou símbolo vai entre aspas simples, senão o bash parte o caminho.
+function caminhoProBash(caminho) {
+  if (/^[A-Za-z0-9_\/.,+=:@%-]+$/.test(caminho)) return caminho;
+  return "'" + caminho.replace(/'/g, "'\\''") + "'";
+}
+
+// Soltar arquivo de fora na janela faria ela navegar pro arquivo e a Bigorna
+// sumiria. A janela toda recusa o soltar; só o terminal abre exceção abaixo.
+window.addEventListener('dragover', (ev) => {
+  if (ev.defaultPrevented) return; // o terminal já aceitou
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'none';
+});
+window.addEventListener('drop', (ev) => ev.preventDefault());
+
+$('terminal-area').addEventListener('dragover', (ev) => {
+  if (!ev.dataTransfer.types.includes(TIPO_CAMINHO)) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'copy';
+});
+
+// "true": pega o soltar antes da caixa de texto escondida do xterm, que
+// escreveria o caminho uma segunda vez.
+$('terminal-area').addEventListener('drop', (ev) => {
+  const caminho = ev.dataTransfer.getData(TIPO_CAMINHO);
+  if (!caminho) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  // paste e não ptyWrite: se o programa aberto pediu "colagem marcada" (o bash
+  // e o Claude Code pedem), ele recebe como colagem e não executa nada sozinho.
+  term.paste(caminhoProBash(caminho) + ' ');
+  term.focus();
+}, true);
 
 // ============================================================
 // EDITOR
