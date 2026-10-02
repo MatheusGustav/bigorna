@@ -18,6 +18,7 @@ function criarJanela() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      plugins: true, // liga o visor de PDF do Chromium (o PDF abre num iframe)
     },
   });
 

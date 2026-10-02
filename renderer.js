@@ -497,7 +497,100 @@ function avisar(texto) {
   setTimeout(() => { el.textContent = antes; }, 3000);
 }
 
+// ---------- Visor de mídia: imagem, áudio, vídeo e PDF ----------
+// Tudo dentro da própria janela: o Chromium que desenha a Bigorna já sabe
+// mostrar imagem, tocar som e vídeo e ler PDF — nada abre programa de fora.
+
+const TIPOS_DE_MIDIA = [
+  ['imagem', /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i],
+  ['audio', /\.(mp3|wav|ogg|oga|opus|flac|m4a|aac|weba)$/i],
+  ['video', /\.(mp4|webm|mkv|mov|m4v|ogv)$/i],
+  ['pdf', /\.pdf$/i],
+];
+
+function tipoDeMidia(caminho) {
+  const achado = TIPOS_DE_MIDIA.find(([, extensoes]) => extensoes.test(caminho));
+  return achado ? achado[0] : null;
+}
+
+// O endereço file:// do arquivo. Cada pedaço do caminho é codificado (espaço,
+// "#" etc.) e o "?v=" muda a cada abertura, senão o Chromium mostraria a
+// versão guardada em cache de um arquivo que acabou de mudar.
+function enderecoDoArquivo(caminho) {
+  return 'file://' + caminho.split('/').map(encodeURIComponent).join('/') + '?v=' + Date.now();
+}
+
+// Para o som e esvazia o visor. Tirar o src solta o arquivo de verdade: só
+// remover o elemento deixaria o áudio tocando até a limpeza de memória passar.
+function limparVisor() {
+  const tocando = $('visor').querySelector('audio, video');
+  if (tocando) {
+    tocando.pause();
+    tocando.removeAttribute('src');
+  }
+  $('visor').replaceChildren();
+}
+
+function abrirMidia(caminho, tipo) {
+  limparVisor();
+
+  // O texto que estava no editor sai de cena, igual ao trocar de arquivo de
+  // texto: o que não foi salvo não fica guardado em lugar nenhum.
+  if (editor) {
+    const modelo = editor.getModel();
+    editor.setModel(null);
+    if (modelo) modelo.dispose();
+  }
+  $('editor').classList.add('escondido');
+  $('vazio').classList.add('escondido');
+
+  const endereco = enderecoDoArquivo(caminho);
+  let el;
+  if (tipo === 'imagem') {
+    el = document.createElement('img');
+  } else if (tipo === 'pdf') {
+    el = document.createElement('iframe'); // o visor de PDF do próprio Chromium
+  } else {
+    el = document.createElement(tipo); // 'audio' ou 'video', com os controles
+    el.controls = true;
+  }
+  el.src = endereco;
+
+  // Arquivo que o Chromium não consegue ler (ex.: vídeo em formato raro).
+  if (tipo !== 'pdf') {
+    el.addEventListener('error', () => {
+      limparVisor();
+      $('visor').hidden = true;
+      $('vazio').classList.remove('escondido');
+      arquivoAberto = null;
+      $('nome-arquivo').textContent = 'bigorna';
+      avisar(tipo === 'imagem' ? 'não consegui mostrar essa imagem' : 'não consegui tocar esse arquivo');
+    });
+  }
+
+  // Áudio ganha o nome do arquivo em cima, senão fica só uma barra solta.
+  let mostrado = el;
+  if (tipo === 'audio') {
+    mostrado = document.createElement('div');
+    mostrado.className = 'toca-audio';
+    const nome = document.createElement('p');
+    nome.textContent = caminho.slice(caminho.lastIndexOf('/') + 1);
+    mostrado.append(nome, el);
+  }
+
+  $('visor').append(mostrado);
+  $('visor').hidden = false;
+
+  arquivoAberto = caminho;
+  $('nome-arquivo').textContent = caminho;
+  atualizarEstado(); // editor sem modelo: bolinha apagada e salvar desligado
+}
+
 async function abrirArquivo(caminho) {
+  // Imagem, som, vídeo e PDF não vão pro editor de texto: abrem no visor.
+  const tipo = tipoDeMidia(caminho);
+  if (tipo) return abrirMidia(caminho, tipo);
+
   const r = await window.api.readFile(caminho).catch(() => ({ erro: 'leitura' }));
   if (r.erro) {
     avisar(
@@ -520,8 +613,13 @@ async function abrirArquivo(caminho) {
     // Ctrl+S salva — atalho padrão de editor, só vale com o editor em foco.
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, salvar);
     editor.onDidChangeModelContent(atualizarEstado);
-    $('vazio').classList.add('escondido');
   }
+
+  // Se uma mídia estava na tela, sai; o editor volta pro lugar.
+  limparVisor();
+  $('visor').hidden = true;
+  $('editor').classList.remove('escondido');
+  $('vazio').classList.add('escondido');
 
   const modeloVelho = editor.getModel();
   const modelo = monaco.editor.createModel(r.conteudo, undefined, monaco.Uri.file(caminho));
@@ -536,7 +634,8 @@ async function abrirArquivo(caminho) {
 }
 
 async function salvar() {
-  if (!editor || !arquivoAberto) return;
+  // Sem modelo é mídia no visor: salvar aqui escreveria texto em cima dela.
+  if (!editor || !editor.getModel() || !arquivoAberto) return;
   try {
     await window.api.writeFile(arquivoAberto, editor.getValue());
     versaoSalva = editor.getModel().getAlternativeVersionId();
