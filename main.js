@@ -341,7 +341,14 @@ ipcMain.handle('menu:opcoes', async (_ev, caminho, ehPasta) => {
 });
 
 // Ícones do menu do botão direito na aba do terminal.
-const ICONES_DA_ABA = { worktree: 'folder-new', renomear: 'edit-rename', fechar: 'tab-close' };
+const ICONES_DA_ABA = {
+  worktree: 'folder-new',
+  renomear: 'edit-rename',
+  fechar: 'tab-close',
+  lado: 'view-split-left-right',
+  esquerda: 'go-previous',
+  direita: 'go-next',
+};
 
 ipcMain.handle('menu:icones-da-aba', async () => {
   const icones = {};

@@ -28,7 +28,7 @@ function corDoGrupo(repo) {
   return corDoRepo.get(repo);
 }
 
-const terminais = new Map(); // id → { term, fit, caixa, info }
+const terminais = new Map(); // id → { term, fit, caixa, info, col }
 let proximoTerminal = 1;
 let terminalAtivo = null;
 let abaDoMenu = null; // aba clicada com o botão direito, pra ela ficar marcada
@@ -36,13 +36,335 @@ let casa = ''; // pasta pessoal, pro título "~ bash" da aba
 
 const terminalDaVez = () => terminais.get(terminalAtivo) || null;
 
-async function criarTerminal(pasta) {
+// ---------- colunas ----------
+// A área pode ser dividida em colunas lado a lado, quantas couberem no gosto
+// do Matheus. Cada coluna tem a própria barra de abas e mostra um terminal
+// por vez; clicar numa aba só troca o terminal daquela coluna.
+
+const colunas = []; // { el, listaEl, terminaisEl, ativo }, na ordem da tela
+let colunaAtiva = null; // a coluna do terminal com o teclado
+
+const idsDaColuna = (col) => [...terminais].filter(([, t]) => t.col === col).map(([id]) => id);
+
+// Encolheu ou cresceu uma coluna (janela, lateral, divisores): reajusta o
+// terminal à mostra nela. Os escondidos se ajustam ao serem ativados.
+let ajustePendente = null;
+const ajustadorDeColunas = new ResizeObserver(() => {
+  clearTimeout(ajustePendente);
+  ajustePendente = setTimeout(() => {
+    for (const col of colunas) {
+      const t = terminais.get(col.ativo);
+      if (!t) continue;
+      t.fit.fit();
+      window.api.ptyResize(col.ativo, t.term.cols, t.term.rows);
+    }
+  }, 50);
+});
+
+// Cria a coluna logo depois da coluna dada (ou no fim da fila).
+const criarColuna = (aposDe) => criarColunaEm(aposDe ? colunas.indexOf(aposDe) + 1 : colunas.length);
+
+function criarColunaEm(indice) {
+  const col = { ativo: null };
+  col.el = document.createElement('div');
+  col.el.className = 'coluna';
+  const abas = document.createElement('div');
+  abas.className = 'abas';
+  col.listaEl = document.createElement('div');
+  col.listaEl.className = 'abas-lista';
+  const mais = document.createElement('button');
+  mais.className = 'btn-nova-aba';
+  mais.textContent = '+';
+  mais.title = 'Abrir outro terminal nesta coluna';
+  mais.addEventListener('click', () => criarTerminal(undefined, col));
+  abas.append(col.listaEl, mais);
+
+  // Pegar na parte vazia da barra arrasta a coluna inteira; soltar em cima de
+  // outra coluna troca as duas de lugar.
+  abas.draggable = true;
+  abas.addEventListener('dragstart', (ev) => {
+    if (ev.target !== abas) return; // é o arrasto de uma aba, não da coluna
+    ev.dataTransfer.setData(TIPO_COLUNA, '');
+    ev.dataTransfer.effectAllowed = 'move';
+    arrastandoColuna = col;
+    col.el.classList.add('arrastando');
+  });
+  abas.addEventListener('dragend', () => limparArrasto());
+  col.terminaisEl = document.createElement('div');
+  col.terminaisEl.className = 'terminais';
+  col.el.append(abas, col.terminaisEl);
+
+  colunas.splice(indice, 0, col);
+  const seguinte = colunas[indice + 1]; // quem estava nesse lugar da fila
+  $('colunas').insertBefore(col.el, seguinte ? seguinte.el : null);
+  ajustadorDeColunas.observe(col.terminaisEl);
+  ajustarDivisas();
+  return col;
+}
+
+function removerColuna(col) {
+  const i = colunas.indexOf(col);
+  if (i < 0 || colunas.length < 2) return; // a última fica, mesmo vazia
+  colunas.splice(i, 1);
+  ajustadorDeColunas.unobserve(col.terminaisEl);
+  col.el.remove();
+  if (colunaAtiva === col) colunaAtiva = colunas[colunas.length - 1];
+  ajustarDivisas();
+}
+
+// As divisas entre as colunas: tiradas e repostas a cada mudança de estrutura.
+function ajustarDivisas() {
+  const recipiente = $('colunas');
+  for (const d of recipiente.querySelectorAll('.divisa-coluna')) d.remove();
+  for (const col of colunas.slice(1)) {
+    const d = document.createElement('div');
+    d.className = 'divisa-coluna';
+    d.title = 'Arraste pra mudar a largura';
+    d.addEventListener('mousedown', arrastarDivisa);
+    recipiente.insertBefore(d, col.el);
+  }
+}
+
+// Arrastar a divisa muda a largura das duas colunas vizinhas. O flex-grow de
+// cada coluna vira a largura dela em pixels, pra conta fechar.
+function arrastarDivisa(evInicio) {
+  evInicio.preventDefault();
+  const esq = evInicio.currentTarget.previousElementSibling;
+  const dir = evInicio.currentTarget.nextElementSibling;
+  if (!esq || !dir) return;
+  for (const col of colunas) col.el.style.flexGrow = col.el.getBoundingClientRect().width;
+  const wEsq = esq.getBoundingClientRect().width;
+  const wDir = dir.getBoundingClientRect().width;
+  const x0 = evInicio.clientX;
+  document.body.classList.add('arrastando-divisa');
+  function mover(ev) {
+    const delta = Math.max(120 - wEsq, Math.min(ev.clientX - x0, wDir - 120));
+    esq.style.flexGrow = wEsq + delta;
+    dir.style.flexGrow = wDir - delta;
+  }
+  function soltar() {
+    document.body.classList.remove('arrastando-divisa');
+    window.removeEventListener('mousemove', mover);
+    window.removeEventListener('mouseup', soltar);
+  }
+  window.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', soltar);
+}
+
+// Leva o terminal pra outra coluna. moveBefore muda o lugar sem recriar o
+// canvas, então o desenho WebGL do xterm sobrevive à mudança.
+function moverTerminal(id, col) {
+  const t = terminais.get(id);
+  if (!t || !col || t.col === col) return;
+  const origem = t.col;
+  t.col = col;
+  if (col.terminaisEl.moveBefore) col.terminaisEl.moveBefore(t.caixa, null);
+  else col.terminaisEl.appendChild(t.caixa);
+  const irmaos = idsDaColuna(origem);
+  if (!irmaos.length) {
+    origem.ativo = null;
+    removerColuna(origem);
+  } else if (origem.ativo === id) {
+    mostrarNaColuna(irmaos[irmaos.length - 1]);
+  }
+  ativarTerminal(id);
+}
+
+// "Mostrar ao lado": o terminal ganha uma coluna nova, colada na dele.
+function mostrarAoLado(id) {
+  const t = terminais.get(id);
+  if (!t) return;
+  moverTerminal(id, criarColuna(t.col));
+}
+
+// ---------- arrastar abas ----------
+// A aba se arrasta: solta na barra de outra coluna muda de coluna (e de
+// posição na fila), solta no meio de um terminal vai pra coluna dele, e solta
+// na beirada esquerda ou direita de um terminal vira uma coluna nova ali.
+
+const TIPO_ABA = 'application/x-bigorna-aba';
+const TIPO_COLUNA = 'application/x-bigorna-coluna';
+let arrastandoAba = null; // id do terminal da aba arrastada
+let arrastandoColuna = null; // a coluna arrastada pela parte vazia da barra
+let soltarEm = null; // alvo da vez: { col, antesDe } na barra, { col, zona } no terminal, { trocarCom } de coluna
+
+// Muda o terminal de lugar na fila (a ordem do Map é a ordem das abas).
+// antesDe null é o fim da fila.
+function reordenarTerminal(id, antesDe) {
+  if (id === antesDe) return;
+  const entradas = [...terminais];
+  const de = entradas.findIndex(([outro]) => outro === id);
+  if (de < 0) return;
+  const [entrada] = entradas.splice(de, 1);
+  const para = antesDe == null ? entradas.length : entradas.findIndex(([outro]) => outro === antesDe);
+  if (para < 0) return;
+  entradas.splice(para, 0, entrada);
+  terminais.clear();
+  for (const [outro, t] of entradas) terminais.set(outro, t);
+}
+
+function limparArrasto() {
+  arrastandoAba = null;
+  arrastandoColuna = null;
+  soltarEm = null;
+  $('sombra-de-soltar').hidden = true;
+  for (const el of $('colunas').querySelectorAll('.arrastando')) el.classList.remove('arrastando');
+}
+
+// Troca duas colunas de lugar. Cada uma leva junto a largura que tinha.
+function trocarColunas(a, b) {
+  const ia = colunas.indexOf(a);
+  const ib = colunas.indexOf(b);
+  if (ia < 0 || ib < 0 || a === b) return;
+  colunas[ia] = b;
+  colunas[ib] = a;
+  // repõe todas na ordem nova; moveBefore não recria o canvas dos terminais
+  const pai = $('colunas');
+  for (const col of colunas) {
+    if (pai.moveBefore) pai.moveBefore(col.el, null);
+    else pai.appendChild(col.el);
+  }
+  ajustarDivisas();
+  desenharAbas();
+}
+
+// A sombra mostra onde a aba vai cair: linha entre abas ou pedaço do terminal.
+function mostrarSombra(x, y, largura, altura) {
+  const s = $('sombra-de-soltar');
+  s.style.left = x + 'px';
+  s.style.top = y + 'px';
+  s.style.width = largura + 'px';
+  s.style.height = altura + 'px';
+  s.hidden = false;
+}
+
+$('colunas').addEventListener('dragover', (ev) => {
+  const ehColuna = ev.dataTransfer.types.includes(TIPO_COLUNA);
+  if (!ehColuna && !ev.dataTransfer.types.includes(TIPO_ABA)) return;
+  const colEl = ev.target.closest('.coluna');
+  const col = colunas.find((c) => c.el === colEl);
+  if (!col) return;
+
+  // coluna arrastada: qualquer ponto de outra coluna é alvo de troca
+  if (ehColuna) {
+    if (col === arrastandoColuna) {
+      soltarEm = null;
+      $('sombra-de-soltar').hidden = true;
+      return; // em cima de si mesma não há o que trocar
+    }
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'move';
+    soltarEm = { trocarCom: col };
+    const r = col.el.getBoundingClientRect();
+    mostrarSombra(r.x, r.y, r.width, r.height);
+    return;
+  }
+
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+
+  const barra = ev.target.closest('.abas');
+  if (barra) {
+    // na barra: a aba entra antes da aba sob o mouse (metade direita: depois)
+    const abas = [...barra.querySelectorAll('.aba')];
+    const aba = ev.target.closest('.aba');
+    const grupo = ev.target.closest('.grupo');
+    let antesDe = null;
+    let x;
+    if (aba) {
+      const r = aba.getBoundingClientRect();
+      const depois = ev.clientX > r.x + r.width / 2;
+      const vizinha = abas[abas.indexOf(aba) + 1];
+      antesDe = depois ? (vizinha ? vizinha.dados.id : null) : aba.dados.id;
+      x = depois ? r.right : r.x;
+    } else if (grupo) {
+      // em cima da etiqueta do grupo: antes da primeira aba dele
+      const primeira = grupo.querySelector('.aba');
+      antesDe = primeira ? primeira.dados.id : null;
+      x = primeira ? primeira.getBoundingClientRect().x : grupo.getBoundingClientRect().right;
+    } else {
+      const ultima = abas[abas.length - 1];
+      x = ultima ? ultima.getBoundingClientRect().right : barra.getBoundingClientRect().x;
+    }
+    soltarEm = { col, antesDe };
+    const rBarra = barra.getBoundingClientRect();
+    mostrarSombra(x - 1, rBarra.y, 2, rBarra.height);
+    return;
+  }
+
+  // no terminal: beirada esquerda ou direita cria coluna, o meio só muda de coluna
+  const r = col.terminaisEl.getBoundingClientRect();
+  const zona = ev.clientX < r.x + r.width / 4 ? 'esquerda' : ev.clientX > r.right - r.width / 4 ? 'direita' : 'meio';
+  soltarEm = { col, zona };
+  if (zona === 'meio') mostrarSombra(r.x, r.y, r.width, r.height);
+  else if (zona === 'esquerda') mostrarSombra(r.x, r.y, r.width / 2, r.height);
+  else mostrarSombra(r.x + r.width / 2, r.y, r.width / 2, r.height);
+});
+
+$('colunas').addEventListener('dragleave', (ev) => {
+  if (arrastandoAba === null && arrastandoColuna === null) return;
+  if (ev.relatedTarget && $('colunas').contains(ev.relatedTarget)) return;
+  soltarEm = null;
+  $('sombra-de-soltar').hidden = true;
+});
+
+$('colunas').addEventListener('drop', (ev) => {
+  const ehColuna = ev.dataTransfer.types.includes(TIPO_COLUNA);
+  if (!ehColuna && !ev.dataTransfer.types.includes(TIPO_ABA)) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const id = Number(ev.dataTransfer.getData(TIPO_ABA));
+  const alvo = soltarEm;
+  const colArrastada = arrastandoColuna;
+  limparArrasto();
+  if (!alvo) return;
+
+  if (ehColuna) {
+    if (colArrastada && alvo.trocarCom) trocarColunas(colArrastada, alvo.trocarCom);
+    return;
+  }
+
+  const t = terminais.get(id);
+  if (!t) return;
+
+  if (alvo.zona === undefined) {
+    // na barra: entra na posição marcada; mudando de coluna, vai junto
+    if (alvo.antesDe === id) return;
+    reordenarTerminal(id, alvo.antesDe);
+    if (t.col === alvo.col) ativarTerminal(id); // já redesenha na ordem nova
+    else moverTerminal(id, alvo.col);
+    return;
+  }
+  if (alvo.zona === 'meio') {
+    if (t.col === alvo.col) ativarTerminal(id);
+    else moverTerminal(id, alvo.col);
+    return;
+  }
+  // beirada: coluna nova no lado escolhido — menos quando a aba está sozinha
+  // na própria coluna e cairia no mesmo lugar
+  const indice = colunas.indexOf(alvo.col) + (alvo.zona === 'direita' ? 1 : 0);
+  const iOrigem = colunas.indexOf(t.col);
+  if (idsDaColuna(t.col).length === 1 && (indice === iOrigem || indice === iOrigem + 1)) return;
+  moverTerminal(id, criarColunaEm(indice));
+}, true); // na captura: passa na frente do soltar de caminho do terminal
+
+async function criarTerminal(pasta, col) {
   $('shell-fim').hidden = true;
+  if (!col || !colunas.includes(col)) col = colunaAtiva || colunas[0] || criarColuna();
 
   const id = proximoTerminal++;
   const caixa = document.createElement('div');
   caixa.className = 'terminal-caixa';
-  $('terminais').appendChild(caixa);
+  col.terminaisEl.appendChild(caixa);
+
+  // Clicar num terminal já à mostra passa o teclado (e a coluna da vez) pra
+  // ele; o foco em si quem dá é o próprio xterm, pelo mesmo clique.
+  caixa.addEventListener('mousedown', () => {
+    if (terminalAtivo === id || !terminais.has(id)) return;
+    terminalAtivo = id;
+    colunaAtiva = terminais.get(id).col;
+    desenharAbas();
+  });
 
   const term = new Terminal(OPCOES_DO_TERMINAL);
   const fit = new FitAddon.FitAddon();
@@ -81,7 +403,7 @@ async function criarTerminal(pasta) {
 
   // Entra no mapa antes do bash nascer, senão a primeira letra do prompt
   // poderia chegar sem ter quem a receba.
-  terminais.set(id, { term, fit, caixa, info: null, nome: null });
+  terminais.set(id, { term, fit, caixa, info: null, nome: null, col });
   term.onData((data) => window.api.ptyWrite(id, data));
 
   fit.fit();
@@ -91,16 +413,28 @@ async function criarTerminal(pasta) {
   return id;
 }
 
-function ativarTerminal(id) {
-  terminalAtivo = id;
-  for (const [outro, t] of terminais) t.caixa.classList.toggle('escondida', outro !== id);
+// Põe o terminal à mostra na coluna dele, sem mexer no teclado.
+function mostrarNaColuna(id) {
   const t = terminais.get(id);
+  if (!t) return;
+  t.col.ativo = id;
+  for (const [outro, o] of terminais) {
+    if (o.col === t.col) o.caixa.classList.toggle('escondida', outro !== id);
+  }
   // o tamanho pode ter mudado enquanto a aba estava escondida
   requestAnimationFrame(() => {
     t.fit.fit();
     window.api.ptyResize(id, t.term.cols, t.term.rows);
-    t.term.focus();
   });
+}
+
+function ativarTerminal(id) {
+  const t = terminais.get(id);
+  if (!t) return;
+  terminalAtivo = id;
+  colunaAtiva = t.col;
+  mostrarNaColuna(id);
+  requestAnimationFrame(() => t.term.focus());
   desenharAbas();
 }
 
@@ -112,10 +446,18 @@ function fecharTerminal(id, jaEncerrou) {
   if (!jaEncerrou) window.api.ptyKill(id);
   t.term.dispose();
   t.caixa.remove();
+  const irmaos = idsDaColuna(t.col);
+  if (!irmaos.length) {
+    t.col.ativo = null;
+    removerColuna(t.col); // se era a última coluna, ela fica, vazia
+  } else if (t.col.ativo === id) {
+    mostrarNaColuna(irmaos[irmaos.length - 1]);
+  }
   if (terminalAtivo === id) {
     terminalAtivo = null;
-    const resto = [...terminais.keys()];
-    if (resto.length) ativarTerminal(resto[resto.length - 1]);
+    // o teclado vai pro terminal à mostra na mesma coluna, ou na da vez
+    const prox = (colunas.includes(t.col) && t.col.ativo) || (colunaAtiva && colunaAtiva.ativo);
+    if (prox) return ativarTerminal(prox); // ele já redesenha as abas
   }
   desenharAbas();
   if (!terminais.size) $('shell-fim').hidden = false;
@@ -127,21 +469,7 @@ window.api.onPtyData((id, data) => {
 });
 window.api.onPtyExit((id) => fecharTerminal(id, true));
 
-$('btn-nova-aba').addEventListener('click', () => criarTerminal());
 $('btn-reabrir').addEventListener('click', () => criarTerminal());
-
-// Encolheu ou cresceu a área (janela, lateral, divisor): reajusta o da vez.
-// Os escondidos se ajustam na hora em que a aba deles é ativada.
-let ajustePendente = null;
-new ResizeObserver(() => {
-  clearTimeout(ajustePendente);
-  ajustePendente = setTimeout(() => {
-    const t = terminalDaVez();
-    if (!t) return;
-    t.fit.fit();
-    window.api.ptyResize(terminalAtivo, t.term.cols, t.term.rows);
-  }, 50);
-}).observe($('terminais'));
 
 // ---------- a barra de abas ----------
 // De tempo em tempo a Bigorna pergunta de cada terminal: em que pasta está,
@@ -175,7 +503,7 @@ setInterval(() => {
 function abaDoTerminal(id) {
   const t = terminais.get(id);
   const aba = document.createElement('span');
-  aba.className = 'aba' + (id === terminalAtivo ? ' ativa' : '') + (id === abaDoMenu ? ' alvo-do-menu' : '');
+  aba.className = 'aba' + (id === t.col.ativo ? ' ativa' : '') + (id === abaDoMenu ? ' alvo-do-menu' : '');
   aba.dados = { id };
   if (t.info && t.info.programa === 'claude') {
     const marca = document.createElement('span');
@@ -196,39 +524,58 @@ function abaDoTerminal(id) {
   });
   aba.appendChild(x);
   aba.addEventListener('click', () => ativarTerminal(id));
+  aba.draggable = true;
+  aba.addEventListener('dragstart', (ev) => {
+    if (aba.querySelector('input')) return ev.preventDefault(); // renomeando
+    ev.dataTransfer.setData(TIPO_ABA, String(id));
+    ev.dataTransfer.effectAllowed = 'move';
+    arrastandoAba = id;
+    aba.classList.add('arrastando');
+  });
+  // dispara mesmo soltando fora de qualquer alvo (aí nada muda de lugar)
+  aba.addEventListener('dragend', () => {
+    limparArrasto();
+    desenharAbas();
+  });
   return aba;
 }
 
 function desenharAbas() {
-  // redesenhar com a caixa de renomear aberta apagaria o que está sendo digitado
-  if ($('abas-lista').querySelector('input')) return;
+  // redesenhar com a caixa de renomear aberta apagaria o que está sendo
+  // digitado; no meio de um arrasto, sumiria com a aba da mão do mouse
+  if ($('colunas').querySelector('.abas input') || arrastandoAba !== null) return;
 
-  const grupos = new Map(); // repositório → abas dele, na ordem de abertura
-  const soltas = [];
-  for (const [id, t] of terminais) {
-    if (t.info && t.info.repo) {
-      if (!grupos.has(t.info.repo)) grupos.set(t.info.repo, []);
-      grupos.get(t.info.repo).push(id);
-    } else {
-      soltas.push(id);
+  for (const col of colunas) {
+    col.el.classList.toggle('foco', col === colunaAtiva);
+
+    const grupos = new Map(); // repositório → abas dele, na ordem de abertura
+    const soltas = [];
+    for (const [id, t] of terminais) {
+      if (t.col !== col) continue;
+      if (t.info && t.info.repo) {
+        if (!grupos.has(t.info.repo)) grupos.set(t.info.repo, []);
+        grupos.get(t.info.repo).push(id);
+      } else {
+        soltas.push(id);
+      }
     }
-  }
 
-  const novas = document.createDocumentFragment();
-  for (const [repo, ids] of grupos) {
-    const grupo = document.createElement('div');
-    grupo.className = 'grupo';
-    grupo.style.setProperty('--cor', corDoGrupo(repo));
-    const etiqueta = document.createElement('span');
-    etiqueta.className = 'etiqueta';
-    etiqueta.textContent = terminais.get(ids[0]).info.nome;
-    etiqueta.title = repo;
-    grupo.appendChild(etiqueta);
-    for (const id of ids) grupo.appendChild(abaDoTerminal(id));
-    novas.appendChild(grupo);
+    const novas = document.createDocumentFragment();
+    for (const [repo, ids] of grupos) {
+      const grupo = document.createElement('div');
+      grupo.className = 'grupo';
+      grupo.style.setProperty('--cor', corDoGrupo(repo));
+      const etiqueta = document.createElement('span');
+      etiqueta.className = 'etiqueta';
+      etiqueta.textContent = terminais.get(ids[0]).info.nome;
+      etiqueta.title = repo;
+      grupo.appendChild(etiqueta);
+      for (const id of ids) grupo.appendChild(abaDoTerminal(id));
+      novas.appendChild(grupo);
+    }
+    for (const id of soltas) novas.appendChild(abaDoTerminal(id));
+    col.listaEl.replaceChildren(novas);
   }
-  for (const id of soltas) novas.appendChild(abaDoTerminal(id));
-  $('abas-lista').replaceChildren(novas);
 }
 
 // ============================================================
@@ -369,7 +716,10 @@ $('terminal-area').addEventListener('dragover', (ev) => {
 // escreveria o caminho uma segunda vez.
 $('terminal-area').addEventListener('drop', (ev) => {
   const caminho = ev.dataTransfer.getData(TIPO_CAMINHO);
-  const t = terminalDaVez();
+  // o caminho vai pro terminal da coluna onde o mouse soltou
+  const colEl = ev.target.closest('.coluna');
+  const col = colunas.find((c) => c.el === colEl) || colunaAtiva;
+  const t = (col && terminais.get(col.ativo)) || terminalDaVez();
   if (!caminho || !t) return;
   ev.preventDefault();
   ev.stopPropagation();
@@ -377,6 +727,11 @@ $('terminal-area').addEventListener('drop', (ev) => {
   // e o Claude Code pedem), ele recebe como colagem e não executa nada sozinho.
   t.term.paste(caminhoProBash(caminho) + ' ');
   t.term.focus();
+  if (col && terminalAtivo !== col.ativo) {
+    terminalAtivo = col.ativo;
+    colunaAtiva = col;
+    desenharAbas();
+  }
 }, true);
 
 // ============================================================
@@ -518,7 +873,14 @@ function itensDaAba(id) {
   const t = terminais.get(id);
   const branch = t.info && t.info.branch;
   const ic = iconesDaAba || {};
+  const i = colunas.indexOf(t.col);
+  const sozinho = idsDaColuna(t.col).length === 1;
   return [
+    // sozinho na coluna, mostrar ao lado não muda nada: fica desligado
+    { texto: 'Mostrar ao lado', icone: ic.lado, desligado: sozinho, acao: () => mostrarAoLado(id) },
+    { texto: 'Mover pra coluna da esquerda', icone: ic.esquerda, desligado: i < 1, acao: () => moverTerminal(id, colunas[i - 1]) },
+    { texto: 'Mover pra coluna da direita', icone: ic.direita, desligado: i === colunas.length - 1, acao: () => moverTerminal(id, colunas[i + 1]) },
+    '-',
     branch && !BRANCHES_DA_PRINCIPAL.includes(branch)
       ? { texto: `Abrir worktree de ${branch}`, icone: ic.worktree, acao: () => abrirWorktree(id) }
       : { texto: 'Abrir worktree', icone: ic.worktree, desligado: true },
@@ -528,7 +890,7 @@ function itensDaAba(id) {
   ];
 }
 
-$('abas-lista').addEventListener('contextmenu', async (ev) => {
+$('colunas').addEventListener('contextmenu', async (ev) => {
   const aba = ev.target.closest('.aba');
   if (!aba || !aba.dados || aba.querySelector('input')) return;
   ev.preventDefault();
@@ -549,14 +911,14 @@ async function abrirWorktree(id) {
   if (!t || !t.info || !t.info.cwd) return;
   const r = await window.api.abrirWorktree(t.info.cwd).catch(() => ({ erro: 'falhou' }));
   if (r.erro) return avisar(ERRO_DA_WORKTREE[r.erro] || 'não consegui abrir a worktree');
-  await criarTerminal(r.caminho);
+  await criarTerminal(r.caminho, t.col); // na mesma coluna da aba de origem
   atualizarInfo(id); // a aba de origem já está em outra branch
 }
 
 // Nome escolhido na mão, igual ao renomear da lateral. Apagar tudo e dar Enter
 // devolve a aba pro nome automático (a pasta, a branch, o programa rodando).
 async function renomearAba(id) {
-  const aba = [...$('abas-lista').querySelectorAll('.aba')].find((el) => el.dados && el.dados.id === id);
+  const aba = [...$('colunas').querySelectorAll('.aba')].find((el) => el.dados && el.dados.id === id);
   const t = terminais.get(id);
   if (!aba || !t) return;
   const titulo = aba.querySelector('.titulo');

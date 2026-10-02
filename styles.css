@@ -317,8 +317,31 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   flex-direction: column;
 }
 
+/* ---------- colunas de terminais lado a lado ---------- */
+#colunas {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+.coluna {
+  flex: 1 1 0;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+}
+.divisa-coluna {
+  width: 5px;
+  flex: none;
+  background: var(--fundo-2);
+  border-left: 1px solid var(--borda);
+  border-right: 1px solid var(--borda);
+  cursor: col-resize;
+}
+.divisa-coluna:hover { background: #2e2e2e; }
+
 /* ---------- abas dos terminais (estilo Konsole, grupos por repositório) ---------- */
-#abas {
+.abas {
   height: 23px;
   font-size: 11px;
   flex: none;
@@ -328,7 +351,7 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   border-bottom: 1px solid var(--borda);
   user-select: none;
 }
-#abas-lista {
+.abas-lista {
   display: flex;
   align-items: stretch;
   overflow-x: auto;
@@ -368,10 +391,26 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
 .aba.alvo-do-menu { background: #2e2e2e; }      /* clicada com o botão direito */
 .aba .caixa-nome { width: 100px; flex: none; font-size: 11px; }
 .aba.ativa { background: var(--fundo); color: var(--texto); }
+/* na coluna sem o foco do teclado, a aba ativa fica um tom mais apagada */
+.coluna:not(.foco) .aba.ativa { color: #b4b4b4; }
 .aba .claude { font-size: 9px; opacity: .8; }
 .aba .x { opacity: .5; font-size: 15px; line-height: 1; padding: 0 2px; }
 .aba .x:hover { opacity: 1; }
-#btn-nova-aba {
+.aba.arrastando { opacity: .35; }
+/* a parte vazia da barra arrasta a coluna inteira */
+.abas { cursor: grab; }
+.coluna.arrastando { opacity: .5; }
+
+/* onde a aba arrastada vai cair: linha entre abas ou pedaço do terminal */
+#sombra-de-soltar {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  background: rgba(232, 232, 232, 0.1);
+  outline: 1px solid rgba(232, 232, 232, 0.45);
+  outline-offset: -1px;
+}
+.btn-nova-aba {
   width: 24px;
   flex: none;
   background: none;
@@ -381,9 +420,9 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   cursor: pointer;
   font-size: 13px;
 }
-#btn-nova-aba:hover { background: #1f1f1f; }
+.btn-nova-aba:hover { background: #1f1f1f; }
 
-#terminais { flex: 1; position: relative; min-height: 0; }
+.terminais { flex: 1; position: relative; min-height: 0; }
 .terminal-caixa { position: absolute; inset: 0; padding: 4px 0 0 6px; }
 .terminal-caixa.escondida { display: none; }
 

@@ -14,6 +14,9 @@
     <span id="nome-arquivo">bigorna</span>
   </header>
 
+  <!-- a sombra que mostra onde a aba arrastada vai cair -->
+  <div id="sombra-de-soltar" hidden></div>
+
   <div id="corpo">
     <aside id="lateral">
       <div id="raiz-nome"></div>
@@ -33,11 +36,7 @@
       </section>
       <div id="divisor" title="Arraste pra mudar a altura do terminal"></div>
       <section id="terminal-area">
-        <div id="abas">
-          <div id="abas-lista"></div>
-          <button id="btn-nova-aba" title="Abrir outro terminal">+</button>
-        </div>
-        <div id="terminais"></div>
+        <div id="colunas"></div>
         <div id="shell-fim" hidden>
           <p>nenhum terminal aberto</p>
           <button id="btn-reabrir">abrir um novo</button>
