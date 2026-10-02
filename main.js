@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, shell: sistema } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, net, shell: sistema } = require('electron');
 const os = require('os');
 const path = require('path');
 const fs = require('fs/promises');
@@ -422,6 +422,46 @@ ipcMain.handle('fs:zip', async (_ev, caminho) => {
   // impede que um nome começando com "-" seja lido como opção do zip
   await rodar('zip', ['-r', '-q', '-y', './' + zip, './' + nome], { cwd: pasta, maxBuffer: 16 * 1024 * 1024 });
   return { ok: true, zip: path.join(pasta, zip) };
+});
+
+// ---------- Jogos: o emulador roda dentro da própria janela ----------
+// Cada console tem seu emulador em WebAssembly (o "core"). A Bigorna baixa o
+// core uma vez e guarda na pasta de configuração dela; da segunda vez em
+// diante o jogo abre sem internet. Vem do mesmo lugar de onde a biblioteca
+// nostalgist pegaria sozinha — guardar aqui é o que deixa jogar off-line.
+
+const ENDERECO_DOS_CORES =
+  'https://cdn.jsdelivr.net/gh/arianrhodsandlot/retroarch-emscripten-build@v1.22.2/retroarch';
+
+ipcMain.handle('jogo:core', async (_ev, core) => {
+  if (!/^[a-z0-9_]+$/.test(core)) return { erro: 'nome' }; // o nome vem da tela: nada de caminho
+  const pasta = path.join(app.getPath('userData'), 'cores');
+  const js = path.join(pasta, `${core}_libretro.js`);
+  const wasm = path.join(pasta, `${core}_libretro.wasm`);
+  const jaTem = await Promise.all([js, wasm].map((f) => fs.stat(f).then(() => true, () => false)));
+
+  if (!jaTem.every(Boolean)) {
+    try {
+      await fs.mkdir(pasta, { recursive: true });
+      const resposta = await net.fetch(`${ENDERECO_DOS_CORES}/${core}_libretro.zip`);
+      if (!resposta.ok) throw new Error(resposta.status);
+      const zip = path.join(pasta, `${core}.zip`);
+      await fs.writeFile(zip, Buffer.from(await resposta.arrayBuffer()));
+      await rodar('unzip', ['-o', '-q', zip, '-d', pasta]);
+      await fs.rm(zip, { force: true });
+    } catch {
+      return { erro: 'baixar' };
+    }
+  }
+  return { js: await fs.readFile(js), wasm: await fs.readFile(wasm) };
+});
+
+// O arquivo do jogo é binário: o fs:read do editor recusaria. Aqui ele vai cru.
+ipcMain.handle('fs:bytes', async (_ev, arquivo) => {
+  const info = await fs.stat(arquivo).catch(() => null);
+  if (!info) return { erro: 'sumiu' };
+  if (info.size > 64 * 1024 * 1024) return { erro: 'grande' };
+  return { bytes: await fs.readFile(arquivo) };
 });
 
 app.whenReady().then(criarJanela);

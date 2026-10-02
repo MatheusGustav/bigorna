@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld('api', {
   excluir: (caminho) => ipcRenderer.invoke('fs:delete', caminho),
   compactar: (caminho) => ipcRenderer.invoke('fs:zip', caminho),
 
+  // jogos
+  coreDoJogo: (core) => ipcRenderer.invoke('jogo:core', core),
+  lerBytes: (arquivo) => ipcRenderer.invoke('fs:bytes', arquivo),
+
   // menu do botão direito na lateral
   opcoesDoMenu: (caminho, ehPasta) => ipcRenderer.invoke('menu:opcoes', caminho, ehPasta),
   abrirCom: (programa, caminho) => ipcRenderer.send('acao:abrir-com', programa, caminho),

@@ -161,6 +161,68 @@ html, body {
 }
 .toca-audio audio { width: 100%; }
 
+/* mesa de jogo: comandos | tela do console | prateleira de jogos */
+.mesa {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+}
+.mesa-centro {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+#visor .jogo {
+  /* cresce até encher a altura; a largura segue a proporção do console,
+     senão a imagem sairia esticada */
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  image-rendering: pixelated; /* pixel quadrado, do jeito que o aparelho desenhava */
+  outline: none;
+}
+
+.mesa-lado {
+  width: 170px;
+  flex: none;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+.mesa-lado:first-child { border-right: 1px solid var(--borda); }
+.mesa-lado:last-child { border-left: 1px solid var(--borda); }
+
+.mesa-titulo {
+  color: var(--texto-fraco);
+  text-transform: lowercase;
+  letter-spacing: 0.4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--borda);
+}
+.mesa-botao {
+  font: inherit;
+  text-align: left;
+  color: var(--texto);
+  background: var(--fundo-2);
+  border: 1px solid var(--borda);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.mesa-botao:hover { background: #222; }
+.mesa-botao.tocando { background: #222; border-color: var(--texto-fraco); }
+.mesa-jogo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mesa-vazio {
+  color: var(--texto-fraco);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 #vazio {
   position: absolute;
   inset: 0;
@@ -174,6 +236,7 @@ html, body {
 }
 #vazio .dica { font-size: 12px; opacity: 0.7; }
 #marca {
+  cursor: pointer;
   width: 140px;
   image-rendering: pixelated;   /* desenho do Minecraft: ampliar sem borrar */
   opacity: 0.9;

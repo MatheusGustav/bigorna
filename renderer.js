@@ -743,6 +743,7 @@ const TIPOS_DE_MIDIA = [
   ['audio', /\.(mp3|wav|ogg|oga|opus|flac|m4a|aac|weba)$/i],
   ['video', /\.(mp4|webm|mkv|mov|m4v|ogv)$/i],
   ['pdf', /\.pdf$/i],
+  ['jogo', /\.(sfc|smc|fig|nes|gb|gbc|gba|md|gen|smd|sms|gg|a26)$/i],
 ];
 
 function tipoDeMidia(caminho) {
@@ -760,6 +761,13 @@ function enderecoDoArquivo(caminho) {
 // Para o som e esvazia o visor. Tirar o src solta o arquivo de verdade: só
 // remover o elemento deixaria o áudio tocando até a limpeza de memória passar.
 function limparVisor() {
+  // O emulador precisa ser desligado por dentro: só tirar o canvas da tela
+  // deixaria o jogo rodando e consumindo máquina no escuro.
+  if (jogo) {
+    jogo.exit();
+    jogo = null;
+  }
+  jogoPedido = null;
   const tocando = $('visor').querySelector('audio, video');
   if (tocando) {
     tocando.pause();
@@ -768,9 +776,8 @@ function limparVisor() {
   $('visor').replaceChildren();
 }
 
-function abrirMidia(caminho, tipo) {
-  limparVisor();
-
+// Tira o editor de cena e põe o visor na frente. Serve pra mídia e pro jogo.
+function visorNaFrente(caminho) {
   // O texto que estava no editor sai de cena (a automática já gravou).
   if (editor) {
     const modelo = editor.getModel();
@@ -779,6 +786,14 @@ function abrirMidia(caminho, tipo) {
   }
   $('editor').classList.add('escondido');
   $('vazio').classList.add('escondido');
+  $('visor').hidden = false;
+  arquivoAberto = caminho;
+  $('nome-arquivo').textContent = caminho;
+}
+
+function abrirMidia(caminho, tipo) {
+  limparVisor();
+  visorNaFrente(caminho);
 
   const endereco = enderecoDoArquivo(caminho);
   let el;
@@ -815,17 +830,171 @@ function abrirMidia(caminho, tipo) {
   }
 
   $('visor').append(mostrado);
-  $('visor').hidden = false;
-
-  arquivoAberto = caminho;
-  $('nome-arquivo').textContent = caminho;
 }
+
+// ---------- Mesa de jogo: o console no meio, a prateleira ao lado ----------
+// O arquivo do jogo é a fita; o emulador ("core") é o aparelho que lê ela.
+// Cada console tem o seu, e a extensão do arquivo diz qual chamar. O core é
+// baixado uma vez pelo processo principal e fica guardado — daí em diante o
+// jogo abre sem internet.
+// A tela do console é quase quadrada e a área é larga, então sobra espaço dos
+// dois lados: à esquerda os comandos, à direita os jogos da pasta ~/Jogos.
+
+const CORE_DO_JOGO = [
+  [/\.(sfc|smc|fig)$/i, 'snes9x'],              // Super Nintendo
+  [/\.nes$/i, 'fceumm'],                        // Nintendinho
+  [/\.(gb|gbc)$/i, 'gambatte'],                 // Game Boy e Game Boy Color
+  [/\.gba$/i, 'mgba'],                          // Game Boy Advance
+  [/\.(md|gen|smd|sms|gg)$/i, 'genesis_plus_gx'], // Mega Drive, Master System e Game Gear
+  [/\.a26$/i, 'stella2014'],                    // Atari 2600
+];
+
+let jogo = null;       // emulador rodando agora, se houver
+let jogoPedido = null; // arquivo que está sendo preparado (o clique pode mudar no meio)
+let pontoSalvo = null; // o ponto do "salvar", guardado enquanto a Bigorna está aberta
+
+function pedacoDaMesa(classe, texto) {
+  const el = document.createElement('div');
+  el.className = classe;
+  if (texto) el.textContent = texto;
+  return el;
+}
+
+function botaoDaMesa(texto, aoClicar) {
+  const b = document.createElement('button');
+  b.className = 'mesa-botao';
+  b.textContent = texto;
+  b.addEventListener('click', aoClicar);
+  return b;
+}
+
+// Abre a tela de jogo. Sem arquivo, mostra só a prateleira — é o que o clique
+// na bigorna faz: liga o videogame e deixa escolher o que jogar.
+async function abrirMesaDeJogo(caminho) {
+  limparVisor();
+  visorNaFrente(caminho || 'jogos');
+
+  const tela = document.createElement('canvas');
+  tela.className = 'jogo';
+  tela.tabIndex = 0; // sem isso o canvas não recebe foco, e o teclado não chega no jogo
+  tela.width = 256;  // tamanho de partida com a proporção de um console;
+  tela.height = 224; // o emulador troca pelo tamanho real quando o jogo sobe
+
+  const comandos = pedacoDaMesa('mesa-lado');
+  comandos.append(
+    pedacoDaMesa('mesa-titulo', 'comandos'),
+    botaoDaMesa('pausar', (ev) => {
+      if (!jogo) return;
+      const parado = jogo.getStatus() === 'paused';
+      parado ? jogo.resume() : jogo.pause();
+      ev.target.textContent = parado ? 'pausar' : 'voltar';
+      if (parado) tela.focus();
+    }),
+    botaoDaMesa('salvar ponto', async () => {
+      if (!jogo) return;
+      pontoSalvo = (await jogo.saveState()).state;
+      avisar('ponto salvo');
+    }),
+    botaoDaMesa('voltar ao ponto', async () => {
+      if (!jogo || !pontoSalvo) return avisar('nenhum ponto salvo ainda');
+      await jogo.loadState(pontoSalvo);
+      tela.focus();
+    }),
+    botaoDaMesa('recomeçar', () => { if (jogo) { jogo.restart(); tela.focus(); } }),
+  );
+
+  const centro = pedacoDaMesa('mesa-centro');
+  centro.append(tela);
+
+  const prateleira = pedacoDaMesa('mesa-lado');
+  const mesa = pedacoDaMesa('mesa');
+  mesa.append(comandos, centro, prateleira);
+  $('visor').append(mesa);
+
+  encherPrateleira(prateleira, tela, caminho);
+  if (caminho) await rodarJogo(caminho, tela);
+}
+
+// A prateleira é a pasta ~/Jogos lida direto: o que estiver lá aparece aqui.
+async function encherPrateleira(prateleira, tela, aberto) {
+  prateleira.append(pedacoDaMesa('mesa-titulo', 'jogos'));
+  const pasta = (await window.api.home()) + '/Jogos';
+  const itens = await window.api.listDir(pasta).catch(() => null);
+
+  if (!itens) return prateleira.append(pedacoDaMesa('mesa-vazio', 'crie a pasta ~/Jogos e ponha os jogos nela'));
+
+  const jogos = itens.filter((i) => !i.isDir && tipoDeMidia(i.name) === 'jogo');
+  if (jogos.length === 0) return prateleira.append(pedacoDaMesa('mesa-vazio', 'nenhum jogo em ~/Jogos ainda'));
+
+  for (const { name } of jogos) {
+    const caminho = pasta + '/' + name;
+    const item = botaoDaMesa(name.slice(0, name.lastIndexOf('.')), () => {
+      for (const b of prateleira.querySelectorAll('.mesa-botao')) b.classList.remove('tocando');
+      item.classList.add('tocando');
+      $('nome-arquivo').textContent = caminho;
+      rodarJogo(caminho, tela);
+    });
+    item.classList.add('mesa-jogo');
+    if (caminho === aberto) item.classList.add('tocando');
+    prateleira.append(item);
+  }
+}
+
+// Troca o que está rodando na tela que já está montada.
+async function rodarJogo(caminho, tela) {
+  if (jogo) { jogo.exit({ removeCanvas: false }); jogo = null; }
+
+  const [, core] = CORE_DO_JOGO.find(([extensoes]) => extensoes.test(caminho));
+
+  // Na primeira vez de cada console o emulador vem da internet e demora um
+  // pouco; o nome em cima avisa, pra tela preta não parecer travada.
+  const nome = $('nome-arquivo').textContent;
+  $('nome-arquivo').textContent = 'preparando o emulador…';
+  jogoPedido = caminho;
+  const [emulador, fita] = await Promise.all([
+    window.api.coreDoJogo(core).catch(() => ({ erro: 'baixar' })),
+    window.api.lerBytes(caminho).catch(() => ({ erro: 'leitura' })),
+  ]);
+  if (jogoPedido !== caminho) return; // clicou noutro jogo enquanto isso
+  $('nome-arquivo').textContent = caminho;
+
+  if (emulador.erro || fita.erro) {
+    return avisar(emulador.erro === 'baixar'
+      ? 'não consegui baixar o emulador — precisa de internet na primeira vez'
+      : fita.erro === 'grande' ? 'esse arquivo de jogo é grande demais'
+      : 'não consegui ler esse arquivo');
+  }
+
+  try {
+    jogo = await Nostalgist.launch({
+      core,
+      element: tela,
+      size: 'auto', // quem manda no tamanho é o console, não o tamanho da janela:
+                    // assim a imagem cresce sem esticar nem achatar
+      // o jogo só escuta o teclado quando a tela dele está em foco, senão
+      // roubaria as teclas do terminal e do editor
+      respondToGlobalEvents: false,
+      resolveCoreJs: () => ({ fileName: core + '_libretro.js', fileContent: emulador.js }),
+      resolveCoreWasm: () => ({ fileName: core + '_libretro.wasm', fileContent: emulador.wasm }),
+      rom: { fileName: caminho.slice(caminho.lastIndexOf('/') + 1), fileContent: fita.bytes },
+    });
+  } catch {
+    return avisar('esse arquivo não abriu como jogo');
+  }
+  if (jogoPedido !== caminho) return; // trocou de jogo enquanto este subia
+
+  tela.focus(); // já entra valendo: o teclado vai pro jogo sem precisar clicar
+}
+
+// Clicar na bigorna da tela de repouso liga o videogame.
+$('marca').addEventListener('click', () => abrirMesaDeJogo(null));
 
 async function abrirArquivo(caminho) {
   salvarAgora(); // o arquivo que está saindo não perde a última mudança
 
-  // Imagem, som, vídeo e PDF não vão pro editor de texto: abrem no visor.
+  // Imagem, som, vídeo, PDF e jogo não vão pro editor de texto: abrem no visor.
   const tipo = tipoDeMidia(caminho);
+  if (tipo === 'jogo') return abrirMesaDeJogo(caminho);
   if (tipo) return abrirMidia(caminho, tipo);
 
   const r = await window.api.readFile(caminho).catch(() => ({ erro: 'leitura' }));

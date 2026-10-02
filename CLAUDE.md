@@ -1,12 +1,12 @@
 # Bigorna
 
-Terminal com janela própria que substitui o Konsole no dia a dia do Matheus Gustav. Numa tela só: lateral de pastas, editor e terminais em abas — feito antes de tudo pro **Claude Code rodar bem** dentro dele. Jogos pra enquanto a IA trabalha ficam pra depois.
+Terminal com janela própria que substitui o Konsole no dia a dia do Matheus Gustav. Numa tela só: lateral de pastas, editor e terminais em abas — feito antes de tudo pro **Claude Code rodar bem** dentro dele — e com um console embutido pra enquanto a IA trabalha.
 
 Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico é papel do git.
 
 ## Stack
 
-- **Electron** (janela), **xterm.js + node-pty** (terminais, desenho por WebGL), **Monaco** (editor).
+- **Electron** (janela), **xterm.js + node-pty** (terminais, desenho por WebGL), **Monaco** (editor), **nostalgist** (emulador).
 - Sem framework: HTML, CSS e JS puros. `main.js` (processo principal), `preload.js` (ponte), `renderer.js` (tela).
 - Visual preto e branco, quadrado, estilo pixelado assumido. Ícones em SVG, nada de emoji.
 
@@ -15,6 +15,7 @@ Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico
 - **Salvar automático**: toda mudança no editor grava sozinha (0,4s depois da última tecla). Não existe botão salvar nem estado "não salvo"; desfazer é apagar. Ctrl+S força a gravação na hora.
 - **Clicar de novo** no arquivo aberto na lateral fecha ele.
 - **Visor**: imagem, áudio, vídeo e PDF abrem dentro da janela (só ver/tocar, não editar).
+- **Jogo**: clicar na bigorna da tela de repouso, ou num arquivo de jogo (`.sfc`, `.smc`, `.nes`, `.gb`, `.gbc`, `.gba`, `.md`, `.sms`, `.gg`, `.a26`), abre a mesa de jogo no lugar do editor: comandos à esquerda (pausar, salvar ponto, voltar ao ponto, recomeçar), a tela do console no meio e a prateleira à direita com os jogos de `~/Jogos`. O emulador de cada console (`nostalgist` + cores do RetroArch) é baixado uma vez e guardado em `~/.config/bigorna/cores`; depois disso roda sem internet. O teclado vai pro jogo quando a tela dele está em foco — ela já nasce em foco. Fechar é clicar de novo no arquivo, e isso desliga o emulador.
 - **Abas de terminal** agrupadas por repositório git: a Bigorna pergunta a cada 3s a pasta de cada terminal; worktrees caem no mesmo grupo. ✳ na aba = Claude rodando ali. Aba de repositório mostra a branch.
 - **Botão direito na aba**: abrir worktree da branch, renomear a aba (apagar o nome devolve o automático) e fechar o terminal.
 - **Abrir worktree**: o git não deixa a mesma branch em duas pastas, então a branch muda de casa — a pasta principal volta pra main (ou master), onde ela sempre fica, a branch passa a morar em `<repo>-<branch>` ao lado dela e um terminal novo já abre lá, no mesmo grupo de abas. Só a pasta principal faz isso: na main/master o item fica apagado, e numa aba de worktree ele avisa. Com arquivo mexido sem commit, não faz nada e avisa na barra de cima.
