@@ -17,7 +17,7 @@ Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico
 - **Visor**: imagem, áudio, vídeo e PDF abrem dentro da janela (só ver/tocar, não editar).
 - **Abas de terminal** agrupadas por repositório git: a Bigorna pergunta a cada 3s a pasta de cada terminal; worktrees caem no mesmo grupo. ✳ na aba = Claude rodando ali. Aba de repositório mostra a branch.
 - **Botão direito na aba**: abrir worktree da branch, renomear a aba (apagar o nome devolve o automático) e fechar o terminal.
-- **Abrir worktree**: o git não deixa a mesma branch em duas pastas, então a branch muda de casa — a pasta de origem volta pra branch anterior (ou main/master, ou solta no commit), a branch passa a morar em `<repo>-<branch>` ao lado do repositório e um terminal novo já abre lá, no mesmo grupo de abas. Com arquivo mexido sem commit, não faz nada e avisa na barra de cima.
+- **Abrir worktree**: o git não deixa a mesma branch em duas pastas, então a branch muda de casa — a pasta principal volta pra main (ou master), onde ela sempre fica, a branch passa a morar em `<repo>-<branch>` ao lado dela e um terminal novo já abre lá, no mesmo grupo de abas. Só a pasta principal faz isso: na main/master o item fica apagado, e numa aba de worktree ele avisa. Com arquivo mexido sem commit, não faz nada e avisa na barra de cima.
 - **Teclas capturadas (nada além disso; o resto vai inteiro pro bash)**: Ctrl+J esconde/mostra o terminal, Ctrl+Shift+C/V copia/cola no terminal, Ctrl+S só com o editor em foco.
 - Botão direito na lateral: menu no estilo do Dolphin (abrir com, renomear, lixeira, zip, transcrever áudio…).
 

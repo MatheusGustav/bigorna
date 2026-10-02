@@ -100,9 +100,9 @@ ipcMain.handle('pty:info', async (_ev, id) => {
 
 // ---------- Worktree (a branch muda de casa) ----------
 // O git não deixa a mesma branch aberta em duas pastas. Pra abrir a branch
-// numa worktree, então, a pasta de origem larga ela — volta pra branch
-// anterior, ou pra main/master, ou fica solta no commit atual — e a branch
-// passa a morar numa pasta nova ao lado do repositório.
+// numa worktree, então, a branch muda de casa: a pasta principal do
+// repositório volta pra main (ou master), que é onde ela sempre fica, e a
+// branch passa a morar numa pasta nova ao lado dela.
 ipcMain.handle('git:worktree', async (_ev, cwd) => {
   if (!cwd || !path.isAbsolute(cwd)) return { erro: 'pasta' };
 
@@ -116,6 +116,9 @@ ipcMain.handle('git:worktree', async (_ev, cwd) => {
     branch = atual;
   } catch { return { erro: 'fora-de-repo' }; }
   if (!branch || branch === 'HEAD') return { erro: 'sem-branch' };
+  // só a pasta principal larga a branch; worktree não vira mãe de outra
+  if (origem !== repo) return { erro: 'ja-e-worktree' };
+  if (branch === 'main' || branch === 'master') return { erro: 'ja-e-a-principal' };
 
   // Trocar de branch com arquivo mexido levaria as mudanças junto, caladas.
   const mexido = await rodar('git', ['-C', origem, 'status', '--porcelain']).catch(() => '');
@@ -124,14 +127,14 @@ ipcMain.handle('git:worktree', async (_ev, cwd) => {
   const destino = await caminhoLivre(path.join(path.dirname(repo),
     `${path.basename(repo)}-${branch.replace(/\//g, '-')}`));
 
-  // A origem precisa largar a branch antes, senão o git recusa a worktree.
-  const volta = await largarBranch(origem, branch);
-  if (!volta) return { erro: 'git' };
+  // A pasta principal precisa largar a branch antes, senão o git recusa.
+  const volta = await voltarPraPrincipal(repo);
+  if (!volta) return { erro: 'sem-main' };
   try {
     await rodar('git', ['-C', repo, 'worktree', 'add', destino, branch]);
   } catch (erro) {
     console.error('[worktree] não deu:', erro.message);
-    await rodar('git', ['-C', origem, 'switch', branch]).catch(() => {});
+    await rodar('git', ['-C', repo, 'switch', branch]).catch(() => {});
     return { erro: 'git' };
   }
   console.log('[worktree]', branch, 'agora mora em', destino, '; origem foi pra', volta);
@@ -145,16 +148,14 @@ async function caminhoLivre(caminho) {
   return tentativa;
 }
 
-// Tira a pasta da branch: tenta a anterior, depois main e master; não servindo
-// nenhuma, solta no commit atual. Responde pra onde foi, ou null se não deu.
-async function largarBranch(pasta, branch) {
-  const anterior = await rodar('git', ['-C', pasta, 'rev-parse', '--abbrev-ref', '@{-1}'])
-    .then((s) => s.trim(), () => null);
-  for (const candidata of [anterior, 'main', 'master']) {
-    if (!candidata || candidata === branch || candidata === 'HEAD') continue;
-    if (await rodar('git', ['-C', pasta, 'switch', candidata]).then(() => true, () => false)) return candidata;
+// A pasta principal do repositório vive na main (ou na master, nos
+// repositórios antigos). Responde pra qual delas foi, ou null se não tem
+// nenhuma das duas.
+async function voltarPraPrincipal(repo) {
+  for (const candidata of ['main', 'master']) {
+    if (await rodar('git', ['-C', repo, 'switch', candidata]).then(() => true, () => false)) return candidata;
   }
-  return await rodar('git', ['-C', pasta, 'switch', '--detach']).then(() => 'solta no commit', () => null);
+  return null;
 }
 
 // ---------- Arquivos (lateral de pastas e editor) ----------

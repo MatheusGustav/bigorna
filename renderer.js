@@ -502,17 +502,24 @@ $('arvore').addEventListener('contextmenu', async (ev) => {
 const ERRO_DA_WORKTREE = {
   'fora-de-repo': 'essa aba não está num repositório git',
   'sem-branch': 'essa aba não está numa branch',
+  'ja-e-worktree': 'essa aba já está numa worktree',
+  'ja-e-a-principal': 'essa é a branch da pasta principal',
+  'sem-main': 'esse repositório não tem main nem master',
   mexido: 'tem arquivo mexido sem commit; a branch não pode mudar de casa',
 };
 
 let iconesDaAba = null; // vêm do sistema uma vez só
+
+// A pasta principal do repositório mora na main (ou na master): worktree
+// dessas duas não existe, e o item fica apagado.
+const BRANCHES_DA_PRINCIPAL = ['main', 'master'];
 
 function itensDaAba(id) {
   const t = terminais.get(id);
   const branch = t.info && t.info.branch;
   const ic = iconesDaAba || {};
   return [
-    branch
+    branch && !BRANCHES_DA_PRINCIPAL.includes(branch)
       ? { texto: `Abrir worktree de ${branch}`, icone: ic.worktree, acao: () => abrirWorktree(id) }
       : { texto: 'Abrir worktree', icone: ic.worktree, desligado: true },
     '-',
