@@ -31,11 +31,12 @@ function corDoGrupo(repo) {
 const terminais = new Map(); // id → { term, fit, caixa, info }
 let proximoTerminal = 1;
 let terminalAtivo = null;
+let abaDoMenu = null; // aba clicada com o botão direito, pra ela ficar marcada
 let casa = ''; // pasta pessoal, pro título "~ bash" da aba
 
 const terminalDaVez = () => terminais.get(terminalAtivo) || null;
 
-async function criarTerminal() {
+async function criarTerminal(pasta) {
   $('shell-fim').hidden = true;
 
   const id = proximoTerminal++;
@@ -80,11 +81,11 @@ async function criarTerminal() {
 
   // Entra no mapa antes do bash nascer, senão a primeira letra do prompt
   // poderia chegar sem ter quem a receba.
-  terminais.set(id, { term, fit, caixa, info: null });
+  terminais.set(id, { term, fit, caixa, info: null, nome: null });
   term.onData((data) => window.api.ptyWrite(id, data));
 
   fit.fit();
-  await window.api.ptySpawn(id, term.cols, term.rows);
+  await window.api.ptySpawn(id, term.cols, term.rows, pasta);
   ativarTerminal(id);
   atualizarInfo(id); // batiza a aba sem esperar a próxima rodada do relógio
   return id;
@@ -147,7 +148,9 @@ new ResizeObserver(() => {
 // o que roda agora e, se for pasta de repositório git, qual e em que branch.
 // Abas do mesmo repositório viram um grupo com etiqueta e linha colorida.
 
-function tituloDaAba(info) {
+function tituloDaAba(t) {
+  const info = t.info;
+  if (t.nome) return t.nome;
   if (!info) return '…';
   if (info.branch) return info.branch;
   let pasta = info.cwd || '';
@@ -172,7 +175,8 @@ setInterval(() => {
 function abaDoTerminal(id) {
   const t = terminais.get(id);
   const aba = document.createElement('span');
-  aba.className = 'aba' + (id === terminalAtivo ? ' ativa' : '');
+  aba.className = 'aba' + (id === terminalAtivo ? ' ativa' : '') + (id === abaDoMenu ? ' alvo-do-menu' : '');
+  aba.dados = { id };
   if (t.info && t.info.programa === 'claude') {
     const marca = document.createElement('span');
     marca.className = 'claude';
@@ -180,7 +184,8 @@ function abaDoTerminal(id) {
     marca.title = 'Claude rodando aqui';
     aba.appendChild(marca);
   }
-  aba.appendChild(document.createTextNode(tituloDaAba(t.info)));
+  const titulo = Object.assign(document.createElement('span'), { className: 'titulo', textContent: tituloDaAba(t) });
+  aba.appendChild(titulo);
   const x = document.createElement('span');
   x.className = 'x';
   x.textContent = '×';
@@ -195,6 +200,9 @@ function abaDoTerminal(id) {
 }
 
 function desenharAbas() {
+  // redesenhar com a caixa de renomear aberta apagaria o que está sendo digitado
+  if ($('abas-lista').querySelector('input')) return;
+
   const grupos = new Map(); // repositório → abas dele, na ordem de abertura
   const soltas = [];
   for (const [id, t] of terminais) {
@@ -382,6 +390,7 @@ let pedidosDeMenu = 0; // descarta resposta atrasada de um clique antigo
 function fecharMenu() {
   pedidosDeMenu++;
   document.querySelectorAll('.alvo-do-menu').forEach((el) => el.classList.remove('alvo-do-menu'));
+  abaDoMenu = null;
   if (!menuAberto) return;
   menuAberto.raiz.remove();
   if (menuAberto.sub) menuAberto.sub.remove();
@@ -488,6 +497,70 @@ $('arvore').addEventListener('contextmenu', async (ev) => {
   posicionar(menuAberto.raiz, ev.clientX, ev.clientY);
 });
 
+// ---------- o mesmo menu, agora na aba do terminal ----------
+
+const ERRO_DA_WORKTREE = {
+  'fora-de-repo': 'essa aba não está num repositório git',
+  'sem-branch': 'essa aba não está numa branch',
+  mexido: 'tem arquivo mexido sem commit; a branch não pode mudar de casa',
+};
+
+let iconesDaAba = null; // vêm do sistema uma vez só
+
+function itensDaAba(id) {
+  const t = terminais.get(id);
+  const branch = t.info && t.info.branch;
+  const ic = iconesDaAba || {};
+  return [
+    branch
+      ? { texto: `Abrir worktree de ${branch}`, icone: ic.worktree, acao: () => abrirWorktree(id) }
+      : { texto: 'Abrir worktree', icone: ic.worktree, desligado: true },
+    '-',
+    { texto: 'Renomear aba…', icone: ic.renomear, acao: () => renomearAba(id) },
+    { texto: 'Fechar terminal', icone: ic.fechar, acao: () => fecharTerminal(id) },
+  ];
+}
+
+$('abas-lista').addEventListener('contextmenu', async (ev) => {
+  const aba = ev.target.closest('.aba');
+  if (!aba || !aba.dados || aba.querySelector('input')) return;
+  ev.preventDefault();
+  fecharMenu();
+  const pedido = pedidosDeMenu;
+  abaDoMenu = aba.dados.id;
+  aba.classList.add('alvo-do-menu');
+  if (!iconesDaAba) iconesDaAba = await window.api.iconesDaAba().catch(() => ({}));
+  if (pedido !== pedidosDeMenu) return; // fechou ou clicou em outro enquanto esperava
+  menuAberto = { raiz: desenharMenu(itensDaAba(aba.dados.id), true), sub: null };
+  posicionar(menuAberto.raiz, ev.clientX, ev.clientY);
+});
+
+// A branch sai da pasta de origem e passa a morar numa pasta nova, ao lado do
+// repositório; o terminal novo já abre lá dentro, no mesmo grupo de abas.
+async function abrirWorktree(id) {
+  const t = terminais.get(id);
+  if (!t || !t.info || !t.info.cwd) return;
+  const r = await window.api.abrirWorktree(t.info.cwd).catch(() => ({ erro: 'falhou' }));
+  if (r.erro) return avisar(ERRO_DA_WORKTREE[r.erro] || 'não consegui abrir a worktree');
+  await criarTerminal(r.caminho);
+  atualizarInfo(id); // a aba de origem já está em outra branch
+}
+
+// Nome escolhido na mão, igual ao renomear da lateral. Apagar tudo e dar Enter
+// devolve a aba pro nome automático (a pasta, a branch, o programa rodando).
+async function renomearAba(id) {
+  const aba = [...$('abas-lista').querySelectorAll('.aba')].find((el) => el.dados && el.dados.id === id);
+  const t = terminais.get(id);
+  if (!aba || !t) return;
+  const titulo = aba.querySelector('.titulo');
+  titulo.hidden = true;
+  const nome = await pedirNome(aba, tituloDaAba(t), false, false);
+  titulo.hidden = false;
+  if (nome === null) return;
+  t.nome = nome || null;
+  desenharAbas();
+}
+
 // Fecha ao clicar fora, rolar fora, trocar de janela ou mudar o tamanho.
 // Com o menu aberto, Esc só fecha o menu e não chega no terminal.
 window.addEventListener('mousedown', (ev) => {
@@ -526,7 +599,7 @@ async function compactar(linha) {
 
 // Caixa de nome na própria linha da lateral, igual ao Dolphin: Enter confirma,
 // Esc ou clicar fora cancela. Responde o nome digitado, ou null se cancelou.
-function pedirNome(linha, inicial, separarExtensao) {
+function pedirNome(linha, inicial, separarExtensao, ehArquivo = true) {
   return new Promise((resolve) => {
     const caixa = document.createElement('input');
     caixa.className = 'caixa-nome';
@@ -555,11 +628,12 @@ function pedirNome(linha, inicial, separarExtensao) {
       if (ev.key === 'Escape') terminar(null);
       if (ev.key !== 'Enter') return;
       const nome = caixa.value.trim();
-      if (nome.includes('/') || nome === '.' || nome === '..') {
+      if (ehArquivo && (nome.includes('/') || nome === '.' || nome === '..')) {
         avisar('o nome não pode ter "/" nem ser "." ou ".."');
         return;
       }
-      terminar(nome || null);
+      // nome de arquivo vazio é cancelar; nome de aba vazio é voltar pro automático
+      terminar(ehArquivo ? (nome || null) : nome);
     });
   });
 }

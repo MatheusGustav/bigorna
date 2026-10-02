@@ -37,13 +37,15 @@ function criarJanela() {
 
 // ---------- Terminal (pty = o "fio" que liga a tela ao bash de verdade) ----------
 
-ipcMain.handle('pty:spawn', (_ev, id, cols, rows) => {
+ipcMain.handle('pty:spawn', async (_ev, id, cols, rows, pasta) => {
   const programa = process.env.SHELL || '/bin/bash';
+  const dentroDe = pasta && path.isAbsolute(pasta)
+    && await fs.stat(pasta).then((e) => e.isDirectory(), () => false);
   const p = pty.spawn(programa, [], {
     name: 'xterm-256color',
     cols: cols || 80,
     rows: rows || 24,
-    cwd: os.homedir(),
+    cwd: dentroDe ? pasta : os.homedir(),
     env: process.env,
   });
   shells.set(id, p);
@@ -95,6 +97,65 @@ ipcMain.handle('pty:info', async (_ev, id) => {
   }
   return info;
 });
+
+// ---------- Worktree (a branch muda de casa) ----------
+// O git não deixa a mesma branch aberta em duas pastas. Pra abrir a branch
+// numa worktree, então, a pasta de origem larga ela — volta pra branch
+// anterior, ou pra main/master, ou fica solta no commit atual — e a branch
+// passa a morar numa pasta nova ao lado do repositório.
+ipcMain.handle('git:worktree', async (_ev, cwd) => {
+  if (!cwd || !path.isAbsolute(cwd)) return { erro: 'pasta' };
+
+  let repo, origem, branch;
+  try {
+    const saida = await rodar('git', ['-C', cwd, 'rev-parse', '--path-format=absolute',
+      '--git-common-dir', '--show-toplevel', '--abbrev-ref', 'HEAD']);
+    const [comum, topo, atual] = saida.trim().split('\n');
+    repo = path.dirname(comum);
+    origem = topo;
+    branch = atual;
+  } catch { return { erro: 'fora-de-repo' }; }
+  if (!branch || branch === 'HEAD') return { erro: 'sem-branch' };
+
+  // Trocar de branch com arquivo mexido levaria as mudanças junto, caladas.
+  const mexido = await rodar('git', ['-C', origem, 'status', '--porcelain']).catch(() => '');
+  if (mexido.trim()) return { erro: 'mexido' };
+
+  const destino = await caminhoLivre(path.join(path.dirname(repo),
+    `${path.basename(repo)}-${branch.replace(/\//g, '-')}`));
+
+  // A origem precisa largar a branch antes, senão o git recusa a worktree.
+  const volta = await largarBranch(origem, branch);
+  if (!volta) return { erro: 'git' };
+  try {
+    await rodar('git', ['-C', repo, 'worktree', 'add', destino, branch]);
+  } catch (erro) {
+    console.error('[worktree] não deu:', erro.message);
+    await rodar('git', ['-C', origem, 'switch', branch]).catch(() => {});
+    return { erro: 'git' };
+  }
+  console.log('[worktree]', branch, 'agora mora em', destino, '; origem foi pra', volta);
+  return { caminho: destino, branch, volta };
+});
+
+// bigorna-feat, e se já existir, bigorna-feat-2, bigorna-feat-3…
+async function caminhoLivre(caminho) {
+  let tentativa = caminho;
+  for (let n = 2; await fs.lstat(tentativa).then(() => true, () => false); n++) tentativa = `${caminho}-${n}`;
+  return tentativa;
+}
+
+// Tira a pasta da branch: tenta a anterior, depois main e master; não servindo
+// nenhuma, solta no commit atual. Responde pra onde foi, ou null se não deu.
+async function largarBranch(pasta, branch) {
+  const anterior = await rodar('git', ['-C', pasta, 'rev-parse', '--abbrev-ref', '@{-1}'])
+    .then((s) => s.trim(), () => null);
+  for (const candidata of [anterior, 'main', 'master']) {
+    if (!candidata || candidata === branch || candidata === 'HEAD') continue;
+    if (await rodar('git', ['-C', pasta, 'switch', candidata]).then(() => true, () => false)) return candidata;
+  }
+  return await rodar('git', ['-C', pasta, 'switch', '--detach']).then(() => 'solta no commit', () => null);
+}
 
 // ---------- Arquivos (lateral de pastas e editor) ----------
 
@@ -276,6 +337,15 @@ ipcMain.handle('menu:opcoes', async (_ev, caminho, ehPasta) => {
     audio: !ehPasta && ehAudio(tipo),
     icones,
   };
+});
+
+// Ícones do menu do botão direito na aba do terminal.
+const ICONES_DA_ABA = { worktree: 'folder-new', renomear: 'edit-rename', fechar: 'tab-close' };
+
+ipcMain.handle('menu:icones-da-aba', async () => {
+  const icones = {};
+  for (const [chave, nome] of Object.entries(ICONES_DA_ABA)) icones[chave] = await icone(nome);
+  return icones;
 });
 
 ipcMain.on('acao:abrir-com', (_ev, programa, caminho) => {

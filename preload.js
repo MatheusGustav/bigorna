@@ -2,13 +2,17 @@ const { contextBridge, ipcRenderer, clipboard } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   // terminais (um por aba; o id vem da janela)
-  ptySpawn: (id, cols, rows) => ipcRenderer.invoke('pty:spawn', id, cols, rows),
+  ptySpawn: (id, cols, rows, pasta) => ipcRenderer.invoke('pty:spawn', id, cols, rows, pasta),
   ptyWrite: (id, data) => ipcRenderer.send('pty:write', id, data),
   ptyResize: (id, cols, rows) => ipcRenderer.send('pty:resize', id, cols, rows),
   ptyKill: (id) => ipcRenderer.send('pty:kill', id),
   ptyInfo: (id) => ipcRenderer.invoke('pty:info', id),
   onPtyData: (cb) => ipcRenderer.on('pty:data', (_ev, id, data) => cb(id, data)),
   onPtyExit: (cb) => ipcRenderer.on('pty:exit', (_ev, id, codigo) => cb(id, codigo)),
+
+  // worktree a partir da aba do terminal
+  abrirWorktree: (cwd) => ipcRenderer.invoke('git:worktree', cwd),
+  iconesDaAba: () => ipcRenderer.invoke('menu:icones-da-aba'),
 
   // arquivos
   home: () => ipcRenderer.invoke('fs:home'),

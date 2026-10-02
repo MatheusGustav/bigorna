@@ -251,6 +251,8 @@ html, body {
   cursor: pointer;
 }
 .aba:hover { background: #1b1b1b; }
+.aba.alvo-do-menu { background: #2e2e2e; }      /* clicada com o botão direito */
+.aba .caixa-nome { width: 100px; flex: none; font-size: 11px; }
 .aba.ativa { background: var(--fundo); color: var(--texto); }
 .aba .claude { font-size: 9px; opacity: .8; }
 .aba .x { opacity: .5; font-size: 15px; line-height: 1; padding: 0 2px; }
