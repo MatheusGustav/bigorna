@@ -3,10 +3,10 @@
 const $ = (id) => document.getElementById(id);
 
 // ============================================================
-// TERMINAL
+// TERMINAIS EM ABAS (estilo Konsole, grupos por repositório)
 // ============================================================
 
-const term = new Terminal({
+const OPCOES_DO_TERMINAL = {
   fontFamily: 'monospace',
   fontSize: 14,
   cursorBlink: true,
@@ -17,69 +17,211 @@ const term = new Terminal({
     cursor: '#e8e8e8',
     selectionBackground: '#3a3a3a',
   },
-});
-const fit = new FitAddon.FitAddon();
-term.loadAddon(fit);
-term.open($('terminal'));
+};
 
-// Desenho pela placa de vídeo, igual ao VS Code. Além de ser mais leve, ele
-// pinta os blocos (█ ▛ ▜) como quadrados cheios; com a letra da fonte ficava
-// um vão entre eles e o bonequinho do Claude saía listrado. Se a placa falhar,
-// o xterm volta sozinho pro desenho comum.
-try {
-  const webgl = new WebglAddon.WebglAddon();
-  webgl.onContextLoss(() => webgl.dispose());
-  term.loadAddon(webgl);
-} catch (erro) {
-  console.warn('[terminal] sem WebGL, usando o desenho comum:', erro);
+// Cores das etiquetas de grupo. Cada repositório pega a próxima da fila e
+// fica com ela; acabando as cores, a fila recomeça.
+const CORES_DE_GRUPO = ['#e0b050', '#6aa1e0', '#9ece6a', '#c9a0ff', '#e07878', '#5bc8af'];
+const corDoRepo = new Map();
+function corDoGrupo(repo) {
+  if (!corDoRepo.has(repo)) corDoRepo.set(repo, CORES_DE_GRUPO[corDoRepo.size % CORES_DE_GRUPO.length]);
+  return corDoRepo.get(repo);
 }
 
-// Nenhum atalho próprio: tudo vai pro bash. As duas únicas exceções são as
-// mesmas do Konsole: Ctrl+Shift+C copia e Ctrl+Shift+V cola.
-term.attachCustomKeyEventHandler((ev) => {
-  if (ev.type !== 'keydown') return true;
-  if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') {
-    const sel = term.getSelection();
-    if (sel) window.api.copiar(sel);
-    ev.preventDefault();
-    return false;
-  }
-  if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyV') {
-    window.api.colar().then((t) => { if (t) window.api.ptyWrite(t); });
-    ev.preventDefault();
-    return false;
-  }
-  return true;
-});
+const terminais = new Map(); // id → { term, fit, caixa, info }
+let proximoTerminal = 1;
+let terminalAtivo = null;
+let casa = ''; // pasta pessoal, pro título "~ bash" da aba
 
-term.onData((data) => window.api.ptyWrite(data));
-window.api.onPtyData((data) => term.write(data));
+const terminalDaVez = () => terminais.get(terminalAtivo) || null;
 
-async function abrirShell() {
+async function criarTerminal() {
   $('shell-fim').hidden = true;
+
+  const id = proximoTerminal++;
+  const caixa = document.createElement('div');
+  caixa.className = 'terminal-caixa';
+  $('terminais').appendChild(caixa);
+
+  const term = new Terminal(OPCOES_DO_TERMINAL);
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(caixa);
+
+  // Desenho pela placa de vídeo, igual ao VS Code. Além de ser mais leve, ele
+  // pinta os blocos (█ ▛ ▜) como quadrados cheios; com a letra da fonte ficava
+  // um vão entre eles e o bonequinho do Claude saía listrado. Se a placa
+  // falhar, o xterm volta sozinho pro desenho comum.
+  try {
+    const webgl = new WebglAddon.WebglAddon();
+    webgl.onContextLoss(() => webgl.dispose());
+    term.loadAddon(webgl);
+  } catch (erro) {
+    console.warn('[terminal] sem WebGL, usando o desenho comum:', erro);
+  }
+
+  // Nenhum atalho próprio: tudo vai pro bash. As duas únicas exceções são as
+  // mesmas do Konsole: Ctrl+Shift+C copia e Ctrl+Shift+V cola.
+  term.attachCustomKeyEventHandler((ev) => {
+    if (ev.type !== 'keydown') return true;
+    if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') {
+      const sel = term.getSelection();
+      if (sel) window.api.copiar(sel);
+      ev.preventDefault();
+      return false;
+    }
+    if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyV') {
+      window.api.colar().then((t) => { if (t) window.api.ptyWrite(id, t); });
+      ev.preventDefault();
+      return false;
+    }
+    return true;
+  });
+
+  // Entra no mapa antes do bash nascer, senão a primeira letra do prompt
+  // poderia chegar sem ter quem a receba.
+  terminais.set(id, { term, fit, caixa, info: null });
+  term.onData((data) => window.api.ptyWrite(id, data));
+
   fit.fit();
-  await window.api.ptySpawn(term.cols, term.rows);
-  term.focus();
+  await window.api.ptySpawn(id, term.cols, term.rows);
+  ativarTerminal(id);
+  atualizarInfo(id); // batiza a aba sem esperar a próxima rodada do relógio
+  return id;
 }
 
-window.api.onPtyExit(() => {
-  $('shell-fim').hidden = false;
-});
+function ativarTerminal(id) {
+  terminalAtivo = id;
+  for (const [outro, t] of terminais) t.caixa.classList.toggle('escondida', outro !== id);
+  const t = terminais.get(id);
+  // o tamanho pode ter mudado enquanto a aba estava escondida
+  requestAnimationFrame(() => {
+    t.fit.fit();
+    window.api.ptyResize(id, t.term.cols, t.term.rows);
+    t.term.focus();
+  });
+  desenharAbas();
+}
 
-$('btn-reabrir').addEventListener('click', () => {
-  term.reset();
-  abrirShell();
-});
+// jaEncerrou: o bash morreu sozinho (exit); senão é o × da aba matando ele.
+function fecharTerminal(id, jaEncerrou) {
+  const t = terminais.get(id);
+  if (!t) return;
+  terminais.delete(id);
+  if (!jaEncerrou) window.api.ptyKill(id);
+  t.term.dispose();
+  t.caixa.remove();
+  if (terminalAtivo === id) {
+    terminalAtivo = null;
+    const resto = [...terminais.keys()];
+    if (resto.length) ativarTerminal(resto[resto.length - 1]);
+  }
+  desenharAbas();
+  if (!terminais.size) $('shell-fim').hidden = false;
+}
 
-// Encolheu ou cresceu a área (janela, lateral, divisor): reajusta o terminal.
+window.api.onPtyData((id, data) => {
+  const t = terminais.get(id);
+  if (t) t.term.write(data);
+});
+window.api.onPtyExit((id) => fecharTerminal(id, true));
+
+$('btn-nova-aba').addEventListener('click', () => criarTerminal());
+$('btn-reabrir').addEventListener('click', () => criarTerminal());
+
+// Encolheu ou cresceu a área (janela, lateral, divisor): reajusta o da vez.
+// Os escondidos se ajustam na hora em que a aba deles é ativada.
 let ajustePendente = null;
 new ResizeObserver(() => {
   clearTimeout(ajustePendente);
   ajustePendente = setTimeout(() => {
-    fit.fit();
-    window.api.ptyResize(term.cols, term.rows);
+    const t = terminalDaVez();
+    if (!t) return;
+    t.fit.fit();
+    window.api.ptyResize(terminalAtivo, t.term.cols, t.term.rows);
   }, 50);
-}).observe($('terminal'));
+}).observe($('terminais'));
+
+// ---------- a barra de abas ----------
+// De tempo em tempo a Bigorna pergunta de cada terminal: em que pasta está,
+// o que roda agora e, se for pasta de repositório git, qual e em que branch.
+// Abas do mesmo repositório viram um grupo com etiqueta e linha colorida.
+
+function tituloDaAba(info) {
+  if (!info) return '…';
+  if (info.branch) return info.branch;
+  let pasta = info.cwd || '';
+  pasta = pasta === casa ? '~' : pasta.slice(pasta.lastIndexOf('/') + 1);
+  return [pasta, info.programa].filter(Boolean).join(' ') || '…';
+}
+
+async function atualizarInfo(id) {
+  const info = await window.api.ptyInfo(id).catch(() => null);
+  const t = terminais.get(id);
+  if (!t || !info) return;
+  if (JSON.stringify(info) !== JSON.stringify(t.info)) {
+    t.info = info;
+    desenharAbas();
+  }
+}
+
+setInterval(() => {
+  for (const id of terminais.keys()) atualizarInfo(id);
+}, 3000);
+
+function abaDoTerminal(id) {
+  const t = terminais.get(id);
+  const aba = document.createElement('span');
+  aba.className = 'aba' + (id === terminalAtivo ? ' ativa' : '');
+  if (t.info && t.info.programa === 'claude') {
+    const marca = document.createElement('span');
+    marca.className = 'claude';
+    marca.textContent = '✳';
+    marca.title = 'Claude rodando aqui';
+    aba.appendChild(marca);
+  }
+  aba.appendChild(document.createTextNode(tituloDaAba(t.info)));
+  const x = document.createElement('span');
+  x.className = 'x';
+  x.textContent = '×';
+  x.title = 'Fechar este terminal';
+  x.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    fecharTerminal(id);
+  });
+  aba.appendChild(x);
+  aba.addEventListener('click', () => ativarTerminal(id));
+  return aba;
+}
+
+function desenharAbas() {
+  const grupos = new Map(); // repositório → abas dele, na ordem de abertura
+  const soltas = [];
+  for (const [id, t] of terminais) {
+    if (t.info && t.info.repo) {
+      if (!grupos.has(t.info.repo)) grupos.set(t.info.repo, []);
+      grupos.get(t.info.repo).push(id);
+    } else {
+      soltas.push(id);
+    }
+  }
+
+  const novas = document.createDocumentFragment();
+  for (const [repo, ids] of grupos) {
+    const grupo = document.createElement('div');
+    grupo.className = 'grupo';
+    grupo.style.setProperty('--cor', corDoGrupo(repo));
+    const etiqueta = document.createElement('span');
+    etiqueta.className = 'etiqueta';
+    etiqueta.textContent = terminais.get(ids[0]).info.nome;
+    etiqueta.title = repo;
+    grupo.appendChild(etiqueta);
+    for (const id of ids) grupo.appendChild(abaDoTerminal(id));
+    novas.appendChild(grupo);
+  }
+  for (const id of soltas) novas.appendChild(abaDoTerminal(id));
+  $('abas-lista').replaceChildren(novas);
+}
 
 // ============================================================
 // LATERAL DE PASTAS
@@ -215,13 +357,14 @@ $('terminal-area').addEventListener('dragover', (ev) => {
 // escreveria o caminho uma segunda vez.
 $('terminal-area').addEventListener('drop', (ev) => {
   const caminho = ev.dataTransfer.getData(TIPO_CAMINHO);
-  if (!caminho) return;
+  const t = terminalDaVez();
+  if (!caminho || !t) return;
   ev.preventDefault();
   ev.stopPropagation();
   // paste e não ptyWrite: se o programa aberto pediu "colagem marcada" (o bash
   // e o Claude Code pedem), ele recebe como colagem e não executa nada sozinho.
-  term.paste(caminhoProBash(caminho) + ' ');
-  term.focus();
+  t.term.paste(caminhoProBash(caminho) + ' ');
+  t.term.focus();
 }, true);
 
 // ============================================================
@@ -691,7 +834,8 @@ window.addEventListener('keydown', (ev) => {
     if (esconder) {
       if (editor) editor.focus();
     } else {
-      term.focus(); // o ResizeObserver reajusta o tamanho sozinho
+      const t = terminalDaVez();
+      if (t) t.term.focus(); // o ResizeObserver reajusta o tamanho sozinho
     }
   }
 }, true); // "true": a janela ouve a tecla antes do terminal e do editor
@@ -747,9 +891,9 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
 // ============================================================
 
 (async () => {
-  const casa = await window.api.home();
+  casa = await window.api.home();
   $('raiz-nome').textContent = casa;
   pastasLidas.set(casa, { recipiente: $('arvore'), nivel: 0 });
   await montarPasta(casa, $('arvore'), 0);
-  await abrirShell();
+  await criarTerminal();
 })();

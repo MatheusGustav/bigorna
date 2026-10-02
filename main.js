@@ -6,7 +6,7 @@ const { execFile, spawn } = require('child_process');
 const pty = require('node-pty');
 
 let win = null;
-let shell = null;
+const shells = new Map(); // id do terminal (dado pela janela) → pty
 
 function criarJanela() {
   win = new BrowserWindow({
@@ -29,46 +29,70 @@ function criarJanela() {
 
   win.on('closed', () => {
     win = null;
-    if (shell) {
-      shell.kill();
-      shell = null;
-    }
+    for (const p of shells.values()) p.kill();
+    shells.clear();
   });
 }
 
 // ---------- Terminal (pty = o "fio" que liga a tela ao bash de verdade) ----------
 
-ipcMain.handle('pty:spawn', (_ev, cols, rows) => {
-  if (shell) {
-    shell.kill();
-    shell = null;
-  }
+ipcMain.handle('pty:spawn', (_ev, id, cols, rows) => {
   const programa = process.env.SHELL || '/bin/bash';
-  shell = pty.spawn(programa, [], {
+  const p = pty.spawn(programa, [], {
     name: 'xterm-256color',
     cols: cols || 80,
     rows: rows || 24,
     cwd: os.homedir(),
     env: process.env,
   });
-  console.log('[pty] aberto: pid', shell.pid, 'tamanho', cols, 'x', rows);
-  shell.onData((data) => {
-    if (win) win.webContents.send('pty:data', data);
+  shells.set(id, p);
+  console.log('[pty] terminal', id, 'aberto: pid', p.pid, 'tamanho', cols, 'x', rows);
+  p.onData((data) => {
+    if (win) win.webContents.send('pty:data', id, data);
   });
-  shell.onExit(({ exitCode, signal }) => {
-    console.log('[pty] encerrou: código', exitCode, 'sinal', signal);
-    shell = null;
-    if (win) win.webContents.send('pty:exit', exitCode);
+  p.onExit(({ exitCode, signal }) => {
+    console.log('[pty] terminal', id, 'encerrou: código', exitCode, 'sinal', signal);
+    shells.delete(id);
+    if (win) win.webContents.send('pty:exit', id, exitCode);
   });
   return true;
 });
 
-ipcMain.on('pty:write', (_ev, data) => {
-  if (shell) shell.write(data);
+ipcMain.on('pty:write', (_ev, id, data) => {
+  const p = shells.get(id);
+  if (p) p.write(data);
 });
 
-ipcMain.on('pty:resize', (_ev, cols, rows) => {
-  if (shell && cols > 0 && rows > 0) shell.resize(cols, rows);
+ipcMain.on('pty:resize', (_ev, id, cols, rows) => {
+  const p = shells.get(id);
+  if (p && cols > 0 && rows > 0) p.resize(cols, rows);
+});
+
+ipcMain.on('pty:kill', (_ev, id) => {
+  const p = shells.get(id);
+  if (p) p.kill();
+});
+
+// O que a aba do terminal mostra: a pasta em que ele está, o programa rodando
+// agora e, se a pasta for de um repositório git, qual repositório e qual
+// branch. Worktrees respondem o mesmo repositório — é por isso que dois
+// Claude Codes da mesma base caem no mesmo grupo sozinhos.
+ipcMain.handle('pty:info', async (_ev, id) => {
+  const p = shells.get(id);
+  if (!p) return null;
+  const cwd = await fs.readlink(`/proc/${p.pid}/cwd`).catch(() => null);
+  // p.process às vezes vem com o caminho inteiro (/bin/bash): fica só o nome
+  const info = { cwd, programa: path.basename(p.process || ''), repo: null, nome: null, branch: null };
+  if (cwd) {
+    try {
+      const saida = await rodar('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--abbrev-ref', 'HEAD']);
+      const [comum, branch] = saida.trim().split('\n');
+      info.repo = path.dirname(comum);
+      info.nome = path.basename(info.repo);
+      info.branch = branch;
+    } catch { /* fora de repositório: fica só a pasta */ }
+  }
+  return info;
 });
 
 // ---------- Arquivos (lateral de pastas e editor) ----------

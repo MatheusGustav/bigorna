@@ -199,8 +199,77 @@ html, body {
   position: relative;
   background: var(--fundo);
   flex: none;
+  display: flex;
+  flex-direction: column;
 }
-#terminal { position: absolute; inset: 0; padding: 4px 0 0 6px; }
+
+/* ---------- abas dos terminais (estilo Konsole, grupos por repositório) ---------- */
+#abas {
+  height: 23px;
+  font-size: 11px;
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  background: var(--fundo-2);
+  border-bottom: 1px solid var(--borda);
+  user-select: none;
+}
+#abas-lista {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  scrollbar-width: none;  /* abas demais rolam pro lado, sem barra aparecendo */
+}
+.grupo { display: flex; align-items: stretch; position: relative; flex: none; }
+/* a linha fininha embaixo amarra as abas irmãs do mesmo repositório */
+.grupo::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2px;
+  background: var(--cor);
+}
+.etiqueta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  font-weight: 600;
+  color: var(--cor);
+  border-right: 1px solid var(--borda);
+  white-space: nowrap;
+}
+.etiqueta::before { content: ''; width: 7px; height: 7px; background: var(--cor); }
+.aba {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-right: 1px solid var(--borda);
+  color: var(--texto-fraco);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.aba:hover { background: #1b1b1b; }
+.aba.ativa { background: var(--fundo); color: var(--texto); }
+.aba .claude { font-size: 9px; opacity: .8; }
+.aba .x { opacity: .5; font-size: 15px; line-height: 1; padding: 0 2px; }
+.aba .x:hover { opacity: 1; }
+#btn-nova-aba {
+  width: 24px;
+  flex: none;
+  background: none;
+  border: none;
+  border-right: 1px solid var(--borda);
+  color: var(--texto);
+  cursor: pointer;
+  font-size: 13px;
+}
+#btn-nova-aba:hover { background: #1f1f1f; }
+
+#terminais { flex: 1; position: relative; min-height: 0; }
+.terminal-caixa { position: absolute; inset: 0; padding: 4px 0 0 6px; }
+.terminal-caixa.escondida { display: none; }
 
 #shell-fim {
   position: absolute;

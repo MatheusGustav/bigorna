@@ -1,12 +1,14 @@
 const { contextBridge, ipcRenderer, clipboard } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-  // terminal
-  ptySpawn: (cols, rows) => ipcRenderer.invoke('pty:spawn', cols, rows),
-  ptyWrite: (data) => ipcRenderer.send('pty:write', data),
-  ptyResize: (cols, rows) => ipcRenderer.send('pty:resize', cols, rows),
-  onPtyData: (cb) => ipcRenderer.on('pty:data', (_ev, data) => cb(data)),
-  onPtyExit: (cb) => ipcRenderer.on('pty:exit', (_ev, codigo) => cb(codigo)),
+  // terminais (um por aba; o id vem da janela)
+  ptySpawn: (id, cols, rows) => ipcRenderer.invoke('pty:spawn', id, cols, rows),
+  ptyWrite: (id, data) => ipcRenderer.send('pty:write', id, data),
+  ptyResize: (id, cols, rows) => ipcRenderer.send('pty:resize', id, cols, rows),
+  ptyKill: (id) => ipcRenderer.send('pty:kill', id),
+  ptyInfo: (id) => ipcRenderer.invoke('pty:info', id),
+  onPtyData: (cb) => ipcRenderer.on('pty:data', (_ev, id, data) => cb(id, data)),
+  onPtyExit: (cb) => ipcRenderer.on('pty:exit', (_ev, id, codigo) => cb(id, codigo)),
 
   // arquivos
   home: () => ipcRenderer.invoke('fs:home'),
