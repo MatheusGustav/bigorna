@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('api', {
   // jogos
   coreDoJogo: (core) => ipcRenderer.invoke('jogo:core', core),
   lerBytes: (arquivo) => ipcRenderer.invoke('fs:bytes', arquivo),
+  guardarPonto: (jogo, bytes) => ipcRenderer.invoke('jogo:guardar-ponto', jogo, bytes),
+  lerPonto: (jogo) => ipcRenderer.invoke('jogo:ler-ponto', jogo),
 
   // menu do botão direito na lateral
   opcoesDoMenu: (caminho, ehPasta) => ipcRenderer.invoke('menu:opcoes', caminho, ehPasta),

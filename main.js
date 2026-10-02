@@ -464,6 +464,25 @@ ipcMain.handle('fs:bytes', async (_ev, arquivo) => {
   return { bytes: await fs.readFile(arquivo) };
 });
 
+// O ponto de onde o jogo continua. Fica guardado pelo nome do arquivo, na
+// pasta de configuração — sair e voltar amanhã cai no mesmo lugar.
+function arquivoDoPonto(jogo) {
+  const nome = path.basename(jogo).replace(/[^\p{L}\p{N} ._-]/gu, '_');
+  return path.join(app.getPath('userData'), 'pontos', nome + '.ponto');
+}
+
+ipcMain.handle('jogo:guardar-ponto', async (_ev, jogo, bytes) => {
+  const arquivo = arquivoDoPonto(jogo);
+  await fs.mkdir(path.dirname(arquivo), { recursive: true });
+  await fs.writeFile(arquivo, Buffer.from(bytes));
+  return { ok: true };
+});
+
+ipcMain.handle('jogo:ler-ponto', async (_ev, jogo) => {
+  const bytes = await fs.readFile(arquivoDoPonto(jogo)).catch(() => null);
+  return bytes ? { bytes } : { erro: 'sem ponto' };
+});
+
 app.whenReady().then(criarJanela);
 
 app.on('window-all-closed', () => app.quit());

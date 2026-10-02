@@ -743,7 +743,7 @@ const TIPOS_DE_MIDIA = [
   ['audio', /\.(mp3|wav|ogg|oga|opus|flac|m4a|aac|weba)$/i],
   ['video', /\.(mp4|webm|mkv|mov|m4v|ogv)$/i],
   ['pdf', /\.pdf$/i],
-  ['jogo', /\.(sfc|smc|fig|nes|gb|gbc|gba|md|gen|smd|sms|gg|a26)$/i],
+  ['jogo', /\.(sfc|smc|fig|nes|gb|gbc|gba|gen|smd|sms|gg|a26)$/i], // .md fica de fora: é Markdown, não Mega Drive
 ];
 
 function tipoDeMidia(caminho) {
@@ -768,6 +768,8 @@ function limparVisor() {
     jogo = null;
   }
   jogoPedido = null;
+  jogoAtual = null;
+  $('editor-area').classList.remove('dividido');
   const tocando = $('visor').querySelector('audio, video');
   if (tocando) {
     tocando.pause();
@@ -791,9 +793,41 @@ function visorNaFrente(caminho) {
   $('nome-arquivo').textContent = caminho;
 }
 
-function abrirMidia(caminho, tipo) {
-  limparVisor();
-  visorNaFrente(caminho);
+// O visor da esquerda: com um jogo rodando, a mídia abre nele em vez de
+// tomar a tela do jogo — documento e partida convivem, metade pra cada um.
+function limparVisorDoc() {
+  const tocando = $('visor-doc').querySelector('audio, video');
+  if (tocando) {
+    tocando.pause();
+    tocando.removeAttribute('src');
+  }
+  $('visor-doc').replaceChildren();
+  $('visor-doc').hidden = true;
+}
+
+async function abrirMidia(caminho, tipo) {
+  const aoLado = !!jogo; // jogo rodando: a mídia vai pra metade esquerda e ele continua
+  let alvo;
+  if (aoLado) {
+    limparVisorDoc();
+    salvarAgora();
+    if (editor) {
+      const modelo = editor.getModel();
+      editor.setModel(null);
+      if (modelo) modelo.dispose();
+    }
+    $('editor').classList.add('escondido');
+    $('editor-area').classList.add('dividido');
+    alvo = $('visor-doc');
+    alvo.hidden = false;
+    arquivoAberto = caminho;
+    $('nome-arquivo').textContent = caminho;
+  } else {
+    limparVisor();
+    limparVisorDoc();
+    visorNaFrente(caminho);
+    alvo = $('visor');
+  }
 
   const endereco = enderecoDoArquivo(caminho);
   let el;
@@ -810,12 +844,8 @@ function abrirMidia(caminho, tipo) {
   // Arquivo que o Chromium não consegue ler (ex.: vídeo em formato raro).
   if (tipo !== 'pdf') {
     el.addEventListener('error', () => {
-      limparVisor();
-      $('visor').hidden = true;
-      $('vazio').classList.remove('escondido');
-      arquivoAberto = null;
-      $('nome-arquivo').textContent = 'bigorna';
       avisar(tipo === 'imagem' ? 'não consegui mostrar essa imagem' : 'não consegui tocar esse arquivo');
+      fecharArquivo();
     });
   }
 
@@ -829,7 +859,7 @@ function abrirMidia(caminho, tipo) {
     mostrado.append(nome, el);
   }
 
-  $('visor').append(mostrado);
+  alvo.append(mostrado);
 }
 
 // ---------- Mesa de jogo: o console no meio, a prateleira ao lado ----------
@@ -845,13 +875,37 @@ const CORE_DO_JOGO = [
   [/\.nes$/i, 'fceumm'],                        // Nintendinho
   [/\.(gb|gbc)$/i, 'gambatte'],                 // Game Boy e Game Boy Color
   [/\.gba$/i, 'mgba'],                          // Game Boy Advance
-  [/\.(md|gen|smd|sms|gg)$/i, 'genesis_plus_gx'], // Mega Drive, Master System e Game Gear
+  [/\.(gen|smd|sms|gg)$/i, 'genesis_plus_gx'],    // Mega Drive, Master System e Game Gear
   [/\.a26$/i, 'stella2014'],                    // Atari 2600
 ];
 
+// Cada console tinha o seu formato de tela; sem isso a imagem sai esticada.
+const FORMATO_DA_TELA = {
+  gambatte: '10 / 9',  // Game Boy e Game Boy Color
+  mgba: '3 / 2',       // Game Boy Advance
+};                     // o resto é 4 / 3, o formato da TV da época
+
 let jogo = null;       // emulador rodando agora, se houver
 let jogoPedido = null; // arquivo que está sendo preparado (o clique pode mudar no meio)
-let pontoSalvo = null; // o ponto do "salvar", guardado enquanto a Bigorna está aberta
+let jogoAtual = null;  // o que está rodando: é dele o ponto que se salva
+
+// O ponto fica em disco, um por jogo. Sair guarda; abrir de novo continua dali.
+async function guardarPonto() {
+  if (!jogo || !jogoAtual) return false;
+  const { state } = await jogo.saveState();
+  const bytes = new Uint8Array(await state.arrayBuffer());
+  const r = await window.api.guardarPonto(jogoAtual, bytes).catch(() => ({ erro: 'gravar' }));
+  return !r.erro;
+}
+
+async function voltarAoPonto(tela) {
+  if (!jogo || !jogoAtual) return false;
+  const r = await window.api.lerPonto(jogoAtual).catch(() => ({ erro: 'ler' }));
+  if (r.erro) return false;
+  await jogo.loadState(r.bytes);
+  if (tela) tela.focus();
+  return true;
+}
 
 function pedacoDaMesa(classe, texto) {
   const el = document.createElement('div');
@@ -872,6 +926,7 @@ function botaoDaMesa(texto, aoClicar) {
 // na bigorna faz: liga o videogame e deixa escolher o que jogar.
 async function abrirMesaDeJogo(caminho) {
   limparVisor();
+  $('editor-area').classList.remove('dividido');
   visorNaFrente(caminho || 'jogos');
 
   const tela = document.createElement('canvas');
@@ -891,16 +946,16 @@ async function abrirMesaDeJogo(caminho) {
       if (parado) tela.focus();
     }),
     botaoDaMesa('salvar ponto', async () => {
-      if (!jogo) return;
-      pontoSalvo = (await jogo.saveState()).state;
-      avisar('ponto salvo');
+      avisar(await guardarPonto() ? 'ponto salvo' : 'nenhum jogo rodando');
     }),
     botaoDaMesa('voltar ao ponto', async () => {
-      if (!jogo || !pontoSalvo) return avisar('nenhum ponto salvo ainda');
-      await jogo.loadState(pontoSalvo);
-      tela.focus();
+      if (!await voltarAoPonto(tela)) avisar('nenhum ponto salvo ainda');
     }),
     botaoDaMesa('recomeçar', () => { if (jogo) { jogo.restart(); tela.focus(); } }),
+    botaoDaMesa('sair', async () => {
+      await guardarPonto(); // sair sem perder o que estava jogando
+      fecharArquivo();
+    }),
   );
 
   const centro = pedacoDaMesa('mesa-centro');
@@ -942,9 +997,15 @@ async function encherPrateleira(prateleira, tela, aberto) {
 
 // Troca o que está rodando na tela que já está montada.
 async function rodarJogo(caminho, tela) {
-  if (jogo) { jogo.exit({ removeCanvas: false }); jogo = null; }
+  if (jogo) {
+    await guardarPonto(); // trocar de jogo também não perde o de antes
+    jogo.exit({ removeCanvas: false });
+    jogo = null;
+    jogoAtual = null;
+  }
 
   const [, core] = CORE_DO_JOGO.find(([extensoes]) => extensoes.test(caminho));
+  tela.style.aspectRatio = FORMATO_DA_TELA[core] || '4 / 3';
 
   // Na primeira vez de cada console o emulador vem da internet e demora um
   // pouco; o nome em cima avisa, pra tela preta não parecer travada.
@@ -983,6 +1044,8 @@ async function rodarJogo(caminho, tela) {
   }
   if (jogoPedido !== caminho) return; // trocou de jogo enquanto este subia
 
+  jogoAtual = caminho;
+  await voltarAoPonto(tela); // tem ponto guardado? cai onde parou da última vez
   tela.focus(); // já entra valendo: o teclado vai pro jogo sem precisar clicar
 }
 
@@ -1022,9 +1085,16 @@ async function abrirArquivo(caminho) {
     editor.onDidChangeModelContent(agendarSalvar);
   }
 
-  // Se uma mídia estava na tela, sai; o editor volta pro lugar.
-  limparVisor();
-  $('visor').hidden = true;
+  // Com um jogo rodando, o texto não expulsa ele: a tela vai pro lado direito
+  // e o texto fica à esquerda, pra escrever sem parar a partida.
+  if (jogo) {
+    limparVisorDoc(); // se uma mídia estava na metade esquerda, o texto toma o lugar dela
+    $('editor-area').classList.add('dividido');
+  } else {
+    limparVisor();
+    limparVisorDoc();
+    $('visor').hidden = true;
+  }
   $('editor').classList.remove('escondido');
   $('vazio').classList.add('escondido');
 
@@ -1041,7 +1111,30 @@ async function abrirArquivo(caminho) {
 // Fecha o que está na tela (texto ou mídia) e volta pra tela de nenhum arquivo.
 function fecharArquivo() {
   salvarAgora(); // fechar não perde a última mudança
+
+  // Texto e jogo juntos: fechar o texto devolve a tela inteira pro jogo, que
+  // continua rodando — não é fim de partida.
+  if ($('editor-area').classList.contains('dividido')) {
+    $('editor-area').classList.remove('dividido');
+    limparVisorDoc();
+    $('editor').classList.add('escondido');
+    if (editor) {
+      const modelo = editor.getModel();
+      editor.setModel(null);
+      if (modelo) modelo.dispose();
+    }
+    if (itemAtivo) {
+      itemAtivo.classList.remove('aberto-no-editor');
+      itemAtivo = null;
+    }
+    arquivoAberto = jogoAtual;
+    $('nome-arquivo').textContent = jogoAtual || 'jogos';
+    document.querySelector('canvas.jogo')?.focus();
+    return;
+  }
+
   limparVisor();
+  limparVisorDoc();
   $('visor').hidden = true;
   if (editor) {
     const modelo = editor.getModel();
@@ -1097,6 +1190,26 @@ window.addEventListener('keydown', (ev) => {
 // ============================================================
 // DIVISOR da lateral (largura das pastas)
 // ============================================================
+
+// Arrastar a divisa entre o arquivo e a tela do jogo (só no modo dividido).
+$('divisor-meio').addEventListener('mousedown', (evInicio) => {
+  evInicio.preventDefault();
+  const area = $('editor-area');
+  const r = area.getBoundingClientRect();
+  document.body.classList.add('arrastando-divisa');
+
+  function mover(ev) {
+    const pct = Math.min(80, Math.max(20, ((ev.clientX - r.left) / r.width) * 100));
+    area.style.setProperty('--divisa', pct + '%');
+  }
+  function soltar() {
+    document.body.classList.remove('arrastando-divisa');
+    window.removeEventListener('mousemove', mover);
+    window.removeEventListener('mouseup', soltar);
+  }
+  window.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', soltar);
+});
 
 $('divisor-lateral').addEventListener('mousedown', (evInicio) => {
   evInicio.preventDefault();
