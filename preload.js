@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // arquivos
   home: () => ipcRenderer.invoke('fs:home'),
+  temaDeIcones: () => ipcRenderer.invoke('icones:tema'),
   listDir: (dir) => ipcRenderer.invoke('fs:list', dir),
   readFile: (arquivo) => ipcRenderer.invoke('fs:read', arquivo),
   writeFile: (arquivo, conteudo) => ipcRenderer.invoke('fs:write', arquivo, conteudo),

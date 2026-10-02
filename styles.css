@@ -114,7 +114,7 @@ html, body {
   outline: none;
 }
 .item.oculto { color: var(--texto-fraco); }      /* arquivos que começam com ponto */
-.item svg { flex: none; }
+.item .icone { flex: none; width: 14px; height: 14px; }
 .filhos { display: none; }
 .filhos.expandida { display: block; }
 

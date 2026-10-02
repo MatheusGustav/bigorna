@@ -169,6 +169,39 @@ ipcMain.handle('fs:list', async (_ev, dir) => {
     .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name, 'pt-BR') : a.isDir ? -1 : 1));
 });
 
+// ---------- Ícones da lateral (Material Icon Theme) ----------
+// O mesmo tema de ícones do VS Code. O pacote traz o manifesto que o VS Code
+// lê: nome de arquivo, extensão e nome de pasta → nome do .svg. A janela pega
+// esses mapas uma vez e monta o caminho de cada ícone.
+
+const PASTA_DOS_ICONES = 'node_modules/material-icon-theme/icons';
+let temaDeIcones = null;
+
+ipcMain.handle('icones:tema', async () => {
+  if (temaDeIcones) return temaDeIcones;
+  const manifesto = JSON.parse(
+    await fs.readFile(path.join(__dirname, 'node_modules/material-icon-theme/dist/material-icons.json'), 'utf8')
+  );
+  // O manifesto aponta pra um apelido do ícone, e alguns apelidos moram num
+  // arquivo de nome diferente (os ".clone.svg"), então aqui cada mapa já sai
+  // com o nome do arquivo que existe no disco.
+  const arquivoDoIcone = (apelido) => path.basename(manifesto.iconDefinitions[apelido].iconPath);
+  const resolver = (mapa) => Object.fromEntries(Object.entries(mapa).map(([k, v]) => [k, arquivoDoIcone(v)]));
+  temaDeIcones = {
+    pasta: PASTA_DOS_ICONES,
+    porNome: resolver(manifesto.fileNames),
+    porExtensao: resolver(manifesto.fileExtensions),
+    pastaPorNome: resolver(manifesto.folderNames),
+    pastaAbertaPorNome: resolver(manifesto.folderNamesExpanded),
+    padrao: {
+      arquivo: arquivoDoIcone(manifesto.file),
+      pasta: arquivoDoIcone(manifesto.folder),
+      pastaAberta: arquivoDoIcone(manifesto.folderExpanded),
+    },
+  };
+  return temaDeIcones;
+});
+
 // ---------- Vigia das pastas: a lateral se atualiza sozinha ----------
 // Um vigia do sistema (inotify) por pasta aberta na lateral. Mudou qualquer
 // coisa dentro dela — criou, apagou, renomeou, mesmo por fora da Bigorna —

@@ -8,7 +8,8 @@ Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico
 
 - **Electron** (janela), **xterm.js + node-pty** (terminais, desenho por WebGL), **Monaco** (editor), **nostalgist** (emulador).
 - Sem framework: HTML, CSS e JS puros. `main.js` (processo principal), `preload.js` (ponte), `renderer.js` (tela).
-- Visual preto e branco, quadrado, estilo pixelado assumido. Ícones em SVG, nada de emoji.
+- Visual escuro, quadrado, estilo pixelado assumido. Ícones em SVG, nada de emoji.
+- **Ícones da lateral**: os do **Material Icon Theme**, o mesmo tema do VS Code — coloridos, um desenho por tipo de arquivo e por nome de pasta (`src`, `node_modules`, `.git`…), com variante de pasta aberta. Vêm do pacote npm `material-icon-theme` (MIT); o manifesto dele é lido uma vez no processo principal e a janela monta o caminho de cada `.svg`.
 
 ## Como a Bigorna se comporta hoje
 

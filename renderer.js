@@ -582,9 +582,33 @@ function desenharAbas() {
 // LATERAL DE PASTAS
 // ============================================================
 
-const ICONE_PASTA = '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M1.5 2h5l1.5 2h6.5A1.5 1.5 0 0 1 16 5.5v7A1.5 1.5 0 0 1 14.5 14h-13A1.5 1.5 0 0 1 0 12.5v-9A1.5 1.5 0 0 1 1.5 2z" opacity=".85"/></svg>';
-const ICONE_PASTA_ABERTA = '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M1.5 2h5l1.5 2H14a1 1 0 0 1 1 1v1H3.2a1.5 1.5 0 0 0-1.43 1.05L0 12V3.5A1.5 1.5 0 0 1 1.5 2zm1.7 5h11.6a1 1 0 0 1 .96 1.27l-1.3 4.5a1.5 1.5 0 0 1-1.44 1.08H1.6a1 1 0 0 1-.96-1.28l1.63-4.5A1.5 1.5 0 0 1 3.2 7z"/></svg>';
-const ICONE_ARQUIVO = '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M3 0h7l3 3v13H3V0zm6.5 1H4v14h8V4.5H9.5V1z" opacity=".7"/></svg>';
+// Ícones do Material Icon Theme — o mesmo tema do VS Code, colorido e com um
+// desenho por tipo de arquivo e por nome de pasta. Os mapas vêm do processo
+// principal uma vez só; sem eles, a linha fica com o espaço do ícone vazio.
+let temaDeIcones = null;
+
+function arquivoDoIcone(nome, ehPasta, aberta) {
+  const chave = nome.toLowerCase();
+  const t = temaDeIcones;
+  if (ehPasta) {
+    const mapa = aberta ? t.pastaAbertaPorNome : t.pastaPorNome;
+    return mapa[chave] || (aberta ? t.padrao.pastaAberta : t.padrao.pasta);
+  }
+  if (t.porNome[chave]) return t.porNome[chave];
+  // Da extensão mais longa pra mais curta: "a.spec.ts" tenta "spec.ts" e depois "ts".
+  const partes = chave.split('.');
+  for (let i = 1; i < partes.length; i++) {
+    const ext = partes.slice(i).join('.');
+    if (t.porExtensao[ext]) return t.porExtensao[ext];
+  }
+  return t.padrao.arquivo;
+}
+
+function icone(nome, ehPasta, aberta = false) {
+  if (!temaDeIcones) return '<span class="icone"></span>';
+  const svg = `${temaDeIcones.pasta}/${arquivoDoIcone(nome, ehPasta, aberta)}`;
+  return `<img class="icone" src="${svg}" alt="" draggable="false">`;
+}
 
 const TIPO_CAMINHO = 'application/x-bigorna-caminho';
 
@@ -602,7 +626,7 @@ function linhaDaArvore(caminho, nome, ehPasta, nivel) {
   const el = document.createElement('div');
   el.className = 'item' + (nome.startsWith('.') ? ' oculto' : '');
   el.style.paddingLeft = 8 + nivel * 14 + 'px';
-  el.innerHTML = (ehPasta ? ICONE_PASTA : ICONE_ARQUIVO) + '<span></span>';
+  el.innerHTML = icone(nome, ehPasta) + '<span></span>';
   el.querySelector('span').textContent = nome;
   el.title = caminho;
   el.dados = { caminho, nome, ehPasta, nivel };
@@ -662,7 +686,7 @@ async function montarPasta(dir, recipiente, nivel) {
 async function alternarPasta(linha, abrir) {
   const { caminho, nivel, filhos } = linha.dados;
   filhos.classList.toggle('expandida', abrir);
-  linha.firstElementChild.outerHTML = abrir ? ICONE_PASTA_ABERTA : ICONE_PASTA;
+  linha.firstElementChild.outerHTML = icone(linha.dados.nome, true, abrir);
   if (abrir) pastasAbertas.add(caminho);
   else pastasAbertas.delete(caminho);
   if (abrir && !pastasLidas.has(caminho)) {
@@ -1050,7 +1074,7 @@ async function criarNovo(linha, ehPasta) {
   const provisoria = document.createElement('div');
   provisoria.className = 'item';
   provisoria.style.paddingLeft = 8 + nivel * 14 + 'px';
-  provisoria.innerHTML = ehPasta ? ICONE_PASTA : ICONE_ARQUIVO;
+  provisoria.innerHTML = icone('', ehPasta);
   recipiente.prepend(provisoria);
   const nome = await pedirNome(provisoria, '', false);
   provisoria.remove();
@@ -1620,6 +1644,7 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
 // ============================================================
 
 (async () => {
+  temaDeIcones = await window.api.temaDeIcones().catch(() => null);
   casa = await window.api.home();
   $('raiz-nome').textContent = casa;
   pastasLidas.set(casa, { recipiente: $('arvore'), nivel: 0 });
