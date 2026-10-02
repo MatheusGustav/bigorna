@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, ipcMain, dialog, shell: sistema } = require('e
 const os = require('os');
 const path = require('path');
 const fs = require('fs/promises');
+const { watch: vigiar } = require('fs');
 const { execFile, spawn } = require('child_process');
 const pty = require('node-pty');
 
@@ -104,6 +105,33 @@ ipcMain.handle('fs:list', async (_ev, dir) => {
   return itens
     .map((d) => ({ name: d.name, isDir: d.isDirectory() }))
     .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name, 'pt-BR') : a.isDir ? -1 : 1));
+});
+
+// ---------- Vigia das pastas: a lateral se atualiza sozinha ----------
+// Um vigia do sistema (inotify) por pasta aberta na lateral. Mudou qualquer
+// coisa dentro dela — criou, apagou, renomeou, mesmo por fora da Bigorna —
+// a janela é avisada e relê a pasta. A espera curta junta uma rajada de
+// mudanças num aviso só.
+const vigias = new Map(); // pasta → { vigia, espera }
+
+ipcMain.handle('fs:watch', (_ev, dir) => {
+  if (vigias.has(dir)) return true;
+  try {
+    const v = vigiar(dir, () => {
+      const dados = vigias.get(dir);
+      if (!dados) return;
+      clearTimeout(dados.espera);
+      dados.espera = setTimeout(() => {
+        if (win) win.webContents.send('fs:mudou', dir);
+      }, 300);
+    });
+    v.on('error', () => { // a pasta sumiu: o vigia morre junto
+      clearTimeout(vigias.get(dir)?.espera);
+      vigias.delete(dir);
+    });
+    vigias.set(dir, { vigia: v, espera: null });
+  } catch { /* sem permissão ou pasta já era: segue sem vigia */ }
+  return true;
 });
 
 ipcMain.handle('fs:read', async (_ev, arquivo) => {

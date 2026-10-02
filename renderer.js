@@ -274,6 +274,7 @@ async function montarPasta(dir, recipiente, nivel) {
   } catch {
     return; // sem permissão de ler: deixa quieto
   }
+  window.api.vigiarPasta(dir); // mudou algo nela (até por fora), a lista relê
   const novas = document.createDocumentFragment();
   const reabrir = [];
   for (const { name, isDir } of itens) {
@@ -314,6 +315,9 @@ async function alternarPasta(linha, abrir) {
     await montarPasta(caminho, filhos, nivel + 1);
   }
 }
+
+// O vigia avisou que uma pasta mudou (pode ter sido por fora da Bigorna).
+window.api.onPastaMudou((dir) => recarregarPasta(dir));
 
 // Relê uma pasta do disco depois de criar, renomear, apagar ou compactar.
 async function recarregarPasta(dir) {

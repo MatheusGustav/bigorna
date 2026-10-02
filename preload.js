@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('api', {
   listDir: (dir) => ipcRenderer.invoke('fs:list', dir),
   readFile: (arquivo) => ipcRenderer.invoke('fs:read', arquivo),
   writeFile: (arquivo, conteudo) => ipcRenderer.invoke('fs:write', arquivo, conteudo),
+  vigiarPasta: (dir) => ipcRenderer.invoke('fs:watch', dir),
+  onPastaMudou: (cb) => ipcRenderer.on('fs:mudou', (_ev, dir) => cb(dir)),
   renomear: (de, para) => ipcRenderer.invoke('fs:rename', de, para),
   criar: (caminho, ehPasta) => ipcRenderer.invoke('fs:create', caminho, ehPasta),
   lixeira: (caminho) => ipcRenderer.invoke('fs:trash', caminho),
