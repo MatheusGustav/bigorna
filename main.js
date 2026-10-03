@@ -13,7 +13,7 @@ function criarJanela() {
   win = new BrowserWindow({
     width: 1280,
     height: 760,
-    backgroundColor: '#0c0c0c',
+    backgroundColor: '#0a0a0a',
     title: 'bigorna',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

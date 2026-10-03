@@ -1,10 +1,23 @@
-/* Preto e branco por enquanto — as cores o Matheus define depois. */
+/* Preto no preto, quina reta, tudo em fonte de terminal. Uma cor de casa, a
+   brasa (ferro quente), só em ponto pequeno: o ✳ do Claude, a ferramenta
+   ligada, o foco. O resto das cores vem dos ícones e dos grupos de abas. */
 :root {
-  --fundo: #0c0c0c;
-  --fundo-2: #141414;
-  --borda: #2a2a2a;
-  --texto: #e8e8e8;
-  --texto-fraco: #8a8a8a;
+  --fundo: #0a0a0a;
+  --fundo-2: #101010;
+  --fundo-3: #161616;
+  --borda: #262626;
+  --borda-2: #333333;
+  --texto: #e6e6e6;
+  --texto-fraco: #7d7d7d;
+  --brasa: #ff8a3d;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  --pixel: "Silkscreen", var(--mono);
+}
+
+/* a letra pixelada, só nos rótulos: nome das peças, grupos de abas e nome das ferramentas do trilho */
+@font-face {
+  font-family: "Silkscreen";
+  src: url("fontes/Silkscreen-Regular.ttf") format("truetype");
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -16,80 +29,157 @@ html, body {
   height: 100%;
   background: var(--fundo);
   color: var(--texto);
-  font-family: system-ui, sans-serif;
-  font-size: 13px;
+  font-family: var(--mono);
+  font-size: 12px;
   overflow: hidden;
 }
 
-/* ---------- barra de cima ---------- */
-#barra {
-  height: 34px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 10px;
-  background: var(--fundo-2);
-  border-bottom: 1px solid var(--borda);
-  -webkit-app-region: drag;           /* dá pra arrastar a janela pela barra */
-}
-#barra button { -webkit-app-region: no-drag; }
+button { font: inherit; }
 
-#btn-lateral {
-  background: none;
-  border: 1px solid var(--borda);
-  border-radius: 4px;
-  color: var(--texto);
-  padding: 4px 7px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-}
-#btn-lateral:hover { background: #1f1f1f; }
-
-#nome-arquivo {
-  color: var(--texto-fraco);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ---------- corpo ---------- */
+/* ---------- corpo: trilho | pastas | arquivo | terminal ---------- */
 #corpo {
   display: flex;
-  height: calc(100% - 34px);
+  height: 100%;
+  padding: 0 6px 0 0;
 }
 
-/* lateral de pastas: desliza ao abrir e fechar, e a largura é ajustável */
+/* ---------- moldura: cada peça é uma caixa com o nome escrito na linha ---------- */
+.rot {
+  position: absolute;
+  top: -10px;
+  left: 10px;
+  right: 10px;
+  height: 19px;
+  display: flex;
+  align-items: center;
+  width: max-content;
+  max-width: calc(100% - 20px);
+  padding: 0 4px;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--texto-fraco);
+  background: var(--fundo);
+  white-space: nowrap;
+  overflow: hidden;
+  z-index: 2;
+  user-select: none;
+}
+.rot-dir { left: auto; right: 10px; }
+.rot .seg { padding: 0 5px; overflow: hidden; text-overflow: ellipsis; }
+.rot .seg.on {
+  font-family: var(--pixel);
+  font-size: 12px;
+  color: var(--texto);
+}
+.rot .seg.on::before { content: '['; color: var(--cor, var(--texto-fraco)); font-family: var(--mono); font-size: 13px; }
+.rot .seg.on::after { content: ']'; color: var(--cor, var(--texto-fraco)); font-family: var(--mono); font-size: 13px; }
+.rot .seg.x { font-size: 17px; line-height: 1; color: #5a5a5a; cursor: pointer; padding-right: 2px; }
+.rot .seg.x:hover { color: var(--texto); }
+
+/* ---------- trilho de ferramentas ---------- */
+#trilho {
+  width: 46px;
+  flex: none;
+  position: relative;
+  z-index: 3; /* a lateral fechada desliza pra trás dele, não por cima */
+  margin: 11px 0 8px 6px;
+  background: var(--fundo);
+  border: 1px solid var(--borda-2); /* a mesma moldura das outras peças */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 4px;
+  user-select: none;
+}
+.ferramenta {
+  width: 34px;
+  height: 34px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #4e4e4e;
+  cursor: pointer;
+}
+.ferramenta svg { width: 18px; height: 18px; }
+.ferramenta:hover { color: #9a9a9a; }
+/* ligada: ícone branco e o fio de brasa na beirada do trilho */
+.ferramenta.ligada { color: var(--texto); }
+.ferramenta.ligada::before {
+  content: '';
+  position: absolute;
+  left: -7px; /* em cima da linha da moldura */
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  background: var(--brasa);
+}
+/* a bigorna é o terminal: não tem fio porque não desliga */
+.ferramenta.casa { margin-bottom: 10px; }
+.ferramenta.casa img { width: 24px; image-rendering: pixelated; opacity: .9; }
+.ferramenta.casa:hover img { opacity: 1; }
+.ferramenta.casa.ligada::before { display: none; }
+/* o nome aparece ao lado quando o mouse passa */
+.ferramenta::after {
+  content: attr(data-nome);
+  position: absolute;
+  left: 44px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 7px;
+  font-family: var(--pixel);
+  font-size: 8px;
+  white-space: nowrap;
+  color: var(--texto);
+  background: var(--fundo-3);
+  border: 1px solid var(--borda-2);
+  display: none;
+  z-index: 60;
+  pointer-events: none;
+}
+.ferramenta:hover::after { display: block; }
+#trilho .espaco { flex: 1; }
+/* quantos Claudes estão rodando, somados de todas as abas */
+#claudes {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--brasa);
+  font-size: 11px;
+}
+#claudes small { color: var(--texto-fraco); font-size: 9px; }
+
+/* ---------- lateral de pastas: desliza ao abrir e fechar, largura ajustável ---------- */
 #lateral {
   --largura: 240px;
   width: var(--largura);
   min-width: var(--largura);
-  background: var(--fundo-2);
-  border-right: 1px solid var(--borda);
-  overflow-y: auto;
+  position: relative;
+  margin: 11px 0 8px 6px;
+  background: var(--fundo);
+  border: 1px solid var(--borda-2);
+  display: flex;
+  flex-direction: column;
   transition: margin-left 0.18s ease;
 }
-#lateral.fechada { margin-left: calc(-1 * var(--largura) - 1px); }
+#lateral.fechada { margin-left: calc(-1 * var(--largura) - 14px); }
 #lateral.arrastando { transition: none; }
+#lateral.fechada + #divisor-lateral { display: none; }
 
 #divisor-lateral {
-  width: 5px;
+  width: 6px;
   flex: none;
-  background: var(--fundo-2);
-  border-right: 1px solid var(--borda);
   cursor: col-resize;
 }
-#divisor-lateral:hover { background: #2e2e2e; }
+#divisor-lateral:hover { background: #1a1a1a; }
 
-#raiz-nome {
-  padding: 8px 12px;
-  color: var(--texto-fraco);
-  text-transform: lowercase;
-  letter-spacing: 0.4px;
-  border-bottom: 1px solid var(--borda);
-}
-
-#arvore { padding: 4px 0 20px; user-select: none; }
+#raiz-nome { text-transform: lowercase; }
+#arvore { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 0 12px; user-select: none; }
 
 .item {
   display: flex;
@@ -109,7 +199,6 @@ html, body {
   color: var(--texto);
   background: var(--fundo);
   border: 1px solid #555;
-  border-radius: 2px;
   padding: 0 3px;
   outline: none;
 }
@@ -118,17 +207,33 @@ html, body {
 .filhos { display: none; }
 .filhos.expandida { display: block; }
 
-/* ---------- lado direito ---------- */
-#direita {
-  flex: 1;
+/* ---------- a peça do arquivo: editor, visor ou mesa de jogo ---------- */
+#editor-area {
+  width: 50%;            /* o divisor muda */
+  min-width: 200px;
+  flex: none;
+  position: relative;
+  margin: 11px 0 8px;
+  border: 1px solid var(--borda-2);
   display: flex;
   flex-direction: column;
-  min-width: 0;
 }
+#corpo.sem-terminal #editor-area { margin-right: 0; }
+/* a lateral fechada não deixa a peça colada no trilho */
+#lateral.fechada ~ #editor-area { margin-left: 6px; }
+/* sem terminal na tela (Ctrl+J), o arquivo fica com tudo */
+#corpo.sem-terminal #editor-area { width: auto !important; flex: 1; }
 
-#editor-area { flex: 1; position: relative; min-height: 80px; }
+#editor-corpo { flex: 1; position: relative; min-height: 80px; margin: 10px 0 8px; }
 #editor { position: absolute; inset: 0; }
 #editor.escondido { display: none; }
+
+#divisor {
+  width: 6px;
+  flex: none;
+  cursor: col-resize;
+}
+#divisor:hover { background: #1a1a1a; }
 
 /* visor de mídia: imagem, áudio, vídeo e PDF no lugar do editor */
 #visor {
@@ -172,82 +277,84 @@ html, body {
 }
 .toca-audio audio { width: 100%; }
 
-/* mesa de jogo: comandos | tela do console | prateleira de jogos */
+/* mesa de jogo: três molduras lado a lado — comandos | tela do console |
+   prateleira de jogos — cada uma com o nome escrito na linha */
 .mesa {
   width: 100%;
   height: 100%;
   display: flex;
   align-items: stretch;
+  gap: 6px;
+  padding: 12px 6px 6px;
 }
 .mesa-centro {
   flex: 1;
   min-width: 0;
+  position: relative;
+  border: 1px solid var(--borda-2);
+  padding: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 #visor .jogo {
-  /* a tela cresce até o limite do espaço mantendo o formato do console, e o
-     preto fica só dentro dela; o !important é porque o emulador escreve
-     tamanho fixo no próprio canvas */
-  height: 100% !important;
-  width: auto !important;
-  max-width: 100% !important;
-  aspect-ratio: 4 / 3; /* o formato da TV da época; o código troca por console */
+  /* o tamanho é o código que dá (ajustarTela), pra caber no espaço mantendo
+     o formato do console */
+  border: 1px solid #1b1b1b;
   background: #000;
   image-rendering: pixelated; /* pixel quadrado, do jeito que o aparelho desenhava */
   outline: none;
 }
 
 .mesa-lado {
-  width: 170px;
+  width: 150px;
   flex: none;
-  padding: 10px;
+  position: relative;
+  border: 1px solid var(--borda-2);
+  padding: 14px 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+}
+.mesa-itens {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
-.mesa-lado:first-child { border-right: 1px solid var(--borda); }
-.mesa-lado:last-child { border-left: 1px solid var(--borda); }
 
-.mesa-titulo {
-  color: var(--texto-fraco);
-  text-transform: lowercase;
-  letter-spacing: 0.4px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--borda);
-}
+/* comandos e jogos são linhas de texto, sem caixa: a marca › aponta o escolhido */
 .mesa-botao {
   font: inherit;
+  font-size: 11px;
+  line-height: 1.7;
   text-align: left;
-  color: var(--texto);
-  background: var(--fundo-2);
-  border: 1px solid var(--borda);
-  padding: 6px 8px;
+  color: var(--texto-fraco);
+  background: none;
+  border: none;
+  padding: 0 4px;
   cursor: pointer;
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
 }
-.mesa-botao:hover { background: #222; }
-.mesa-botao.tocando { background: #222; border-color: var(--texto-fraco); }
-.mesa-jogo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mesa-botao::before { content: '›'; color: transparent; flex: none; }
+.mesa-botao .tecla { color: var(--brasa); flex: none; }
+/* na lista de comandos a marca › não entra: o atalho já aponta */
+.mesa-botao .tecla ~ span { min-width: 0; }
+.mesa-lado:first-child .mesa-botao::before { display: none; }
+.mesa-botao:hover { color: var(--texto); }
+.mesa-botao:hover::before { color: var(--texto-fraco); }
+.mesa-botao.tocando { color: var(--texto); }
+.mesa-botao.tocando::before { color: var(--brasa); }
+.mesa-jogo { overflow: hidden; text-overflow: ellipsis; }
 .mesa-vazio {
   color: var(--texto-fraco);
   font-size: 11px;
   line-height: 1.6;
 }
-
-#vazio {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: var(--texto-fraco);
-  background: var(--fundo);
-}
-#vazio .dica { font-size: 12px; opacity: 0.7; }
 
 /* texto e jogo ao mesmo tempo: o texto fica à esquerda e a tela vai pro lado
    direito, pra escrever sem parar o jogo */
@@ -272,84 +379,70 @@ html, body {
 body.arrastando-divisa iframe { pointer-events: none; }
 body.arrastando-divisa { cursor: col-resize; user-select: none; }
 #editor-area.dividido .mesa-lado { display: none; }
-#editor-area.dividido #visor .jogo {
-  /* no canto estreito quem manda é a largura; a altura segue o formato */
-  width: 100% !important;
-  height: auto !important;
-  max-height: 100% !important;
-}
-/* a bigorna é papel de parede: fica parada no meio, atrás de tudo, e serve
-   de botão escondido pro emulador */
-#marca {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  cursor: pointer;
-  width: 140px;
-  max-width: 45%;
-  max-height: 55%;
-  object-fit: contain;
-  image-rendering: pixelated;   /* desenho do Minecraft: ampliar sem borrar */
-  opacity: 0.22;
-  -webkit-user-drag: none;
-  user-select: none;
-}
-#vazio.escondido { display: none; }
 
-#divisor {
-  height: 5px;
-  background: var(--fundo-2);
-  border-top: 1px solid var(--borda);
-  border-bottom: 1px solid var(--borda);
-  cursor: row-resize;
-  flex: none;
-}
-#divisor:hover { background: #2e2e2e; }
-
+/* ---------- a base: o terminal ---------- */
 #terminal-area {
-  height: 42%;
-  min-height: 90px;
+  flex: 1;
+  min-width: 200px;
   position: relative;
   background: var(--fundo);
-  flex: none;
   display: flex;
   flex-direction: column;
 }
+/* sem lateral nem arquivo, o terminal também não cola no trilho */
+#lateral.fechada ~ #terminal-area { margin-left: 6px; }
+#lateral:not(.fechada) ~ #editor-area[hidden] ~ #terminal-area { margin-left: 0; }
 
 /* ---------- colunas de terminais lado a lado ---------- */
 #colunas {
   flex: 1;
   min-height: 0;
   display: flex;
+  flex-direction: column; /* linhas de colunas: até 3 por linha */
+}
+.linha {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
   align-items: stretch;
 }
+.linha + .linha .coluna { margin-top: 1px; } /* a linha de cima já deixou o respiro */
 .coluna {
   flex: 1 1 0;
   min-width: 120px;
+  position: relative;
+  margin: 11px 0 8px;
+  border: 1px solid var(--borda-2);
   display: flex;
   flex-direction: column;
 }
+/* a coluna com o teclado tem a moldura na cor do repositório da aba ativa */
+.coluna.foco { border-color: var(--cor, var(--texto-fraco)); }
 .divisa-coluna {
-  width: 5px;
+  width: 6px;
   flex: none;
-  background: var(--fundo-2);
-  border-left: 1px solid var(--borda);
-  border-right: 1px solid var(--borda);
   cursor: col-resize;
 }
-.divisa-coluna:hover { background: #2e2e2e; }
+.divisa-coluna:hover { background: #1a1a1a; }
 
 /* ---------- abas dos terminais (estilo Konsole, grupos por repositório) ---------- */
+/* as abas ficam escritas em cima da linha da moldura, como o lazygit faz */
 .abas {
-  height: 23px;
-  font-size: 11px;
-  flex: none;
+  position: absolute;
+  top: -10px;
+  left: 10px;
+  right: 10px;
+  height: 19px;
+  width: max-content;
+  max-width: calc(100% - 20px);
+  font-size: 13px;
+  line-height: 19px;
   display: flex;
   align-items: stretch;
-  background: var(--fundo-2);
-  border-bottom: 1px solid var(--borda);
+  padding: 0 4px;
+  background: var(--fundo);
   user-select: none;
+  z-index: 2;
 }
 .abas-lista {
   display: flex;
@@ -358,43 +451,35 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   scrollbar-width: none;  /* abas demais rolam pro lado, sem barra aparecendo */
 }
 .grupo { display: flex; align-items: stretch; position: relative; flex: none; }
-/* a linha fininha embaixo amarra as abas irmãs do mesmo repositório */
-.grupo::after {
-  content: '';
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: 2px;
-  background: var(--cor);
-}
 .etiqueta {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-  font-weight: 600;
+  padding: 0 6px 0 5px;
+  font-family: var(--pixel);
+  font-size: 12px;
   color: var(--cor);
-  border-right: 1px solid var(--borda);
   white-space: nowrap;
 }
-.etiqueta::before { content: ''; width: 7px; height: 7px; background: var(--cor); }
 .aba {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px;
-  border-right: 1px solid var(--borda);
+  gap: 4px;
+  padding: 0 5px;
   color: var(--texto-fraco);
   white-space: nowrap;
   cursor: pointer;
 }
-.aba:hover { background: #1b1b1b; }
-.aba.alvo-do-menu { background: #2e2e2e; }      /* clicada com o botão direito */
-.aba .caixa-nome { width: 100px; flex: none; font-size: 11px; }
-.aba.ativa { background: var(--fundo); color: var(--texto); }
+.aba:hover { color: #b4b4b4; }
+.aba.alvo-do-menu { color: var(--texto); }      /* clicada com o botão direito */
+.aba .caixa-nome { width: 100px; flex: none; font-size: 13px; }
+/* a ativa fica entre colchetes na cor do grupo */
+.aba.ativa { color: var(--texto); }
+.aba.ativa::before { content: '['; color: var(--cor, var(--texto-fraco)); }
+.aba.ativa::after { content: ']'; color: var(--cor, var(--texto-fraco)); }
 /* na coluna sem o foco do teclado, a aba ativa fica um tom mais apagada */
 .coluna:not(.foco) .aba.ativa { color: #b4b4b4; }
-.aba .claude { font-size: 9px; opacity: .8; }
-.aba .x { opacity: .5; font-size: 15px; line-height: 1; padding: 0 2px; }
+.aba .claude { font-size: 10px; color: var(--brasa); }
+.aba .x { opacity: .6; font-size: 19px; line-height: 1; margin-top: -2px; }
 .aba .x:hover { opacity: 1; }
 .aba.arrastando { opacity: .35; }
 /* a parte vazia da barra arrasta a coluna inteira */
@@ -406,24 +491,28 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   position: fixed;
   z-index: 50;
   pointer-events: none;
-  background: rgba(232, 232, 232, 0.1);
-  outline: 1px solid rgba(232, 232, 232, 0.45);
+  background: rgba(255, 138, 61, 0.08);
+  outline: 1px solid rgba(255, 138, 61, 0.5);
   outline-offset: -1px;
 }
 .btn-nova-aba {
-  width: 24px;
+  width: 20px;
   flex: none;
   background: none;
   border: none;
-  border-right: 1px solid var(--borda);
-  color: var(--texto);
+  color: var(--texto-fraco);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
 }
-.btn-nova-aba:hover { background: #1f1f1f; }
+.btn-nova-aba:hover { color: var(--texto); }
 
-.terminais { flex: 1; position: relative; min-height: 0; }
-.terminal-caixa { position: absolute; inset: 0; padding: 4px 0 0 6px; }
+.terminais {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  margin: 10px 0 7px;
+}
+.terminal-caixa { position: absolute; inset: 0; padding: 2px 0 0 8px; }
 .terminal-caixa.escondida { display: none; }
 
 #shell-fim {
@@ -441,10 +530,29 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   background: var(--texto);
   color: var(--fundo);
   border: none;
-  border-radius: 4px;
   padding: 6px 14px;
   cursor: pointer;
   font-weight: 600;
+}
+
+/* ---------- aviso curto no canto de baixo ---------- */
+#aviso {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 90;
+  max-width: 60%;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--texto);
+  background: var(--fundo-3);
+  border: 1px solid var(--borda-2);
+  border-left: 3px solid var(--brasa);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
 }
 
 /* ---------- menu do botão direito (no estilo do menu do Dolphin) ---------- */
@@ -453,9 +561,8 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   z-index: 100;
   min-width: 190px;
   padding: 4px;
-  background: #141414;
-  border: 1px solid #333;
-  border-radius: 5px;
+  background: var(--fundo-2);
+  border: 1px solid var(--borda-2);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
   user-select: none;
 }
@@ -466,7 +573,6 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   height: 24px;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 3px;
   white-space: nowrap;
   cursor: default;
 }
@@ -486,5 +592,5 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
 
 /* barra de rolagem discreta */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #2e2e2e; border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: #2e2e2e; }
 ::-webkit-scrollbar-track { background: transparent; }

@@ -7,43 +7,63 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header id="barra">
-    <button id="btn-lateral" title="Mostrar / esconder pastas">
-      <svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M1 2h14v12H1V2zm1 1v10h3V3H2zm4 0v10h8V3H6z"/></svg>
-    </button>
-    <span id="nome-arquivo">bigorna</span>
-  </header>
-
   <!-- a sombra que mostra onde a aba arrastada vai cair -->
   <div id="sombra-de-soltar" hidden></div>
 
   <div id="corpo">
+    <!-- o trilho: a bigorna é o terminal (sempre acesa) e, embaixo dela, as
+         ferramentas penduradas — acesa é a que está na tela -->
+    <nav id="trilho">
+      <button class="ferramenta casa" id="btn-casa" data-nome="só o terminal">
+        <img src="bigorna.png" alt="" draggable="false">
+      </button>
+      <button class="ferramenta" id="btn-lateral" data-nome="pastas">
+        <svg viewBox="0 0 16 16"><path fill="currentColor" d="M1 3h5l1 1h8v9H1V3zm1 1v8h12V5H6.6l-1-1H2z"/></svg>
+      </button>
+      <button class="ferramenta" id="btn-editor" data-nome="editor">
+        <svg viewBox="0 0 16 16"><path fill="currentColor" d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 2h6v1H5V7zm0 2h4v1H5V9z"/></svg>
+      </button>
+      <button class="ferramenta" id="btn-visor" data-nome="visor">
+        <svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 3C4 3 1.5 6 1 8c.5 2 3 5 7 5s6.5-3 7-5c-.5-2-3-5-7-5zm0 1c3 0 5.3 2.2 6 4-.7 1.8-3 4-6 4S2.7 9.8 2 8c.7-1.8 3-4 6-4zm0 2a2 2 0 100 4 2 2 0 000-4z"/></svg>
+      </button>
+      <button class="ferramenta" id="btn-jogo" data-nome="fliperama">
+        <svg viewBox="0 0 16 16"><path fill="currentColor" d="M3 5h10v6H3V5zm1 1v4h8V6H4zm1 1h1v2H5V7zm5 0h1v1h-1V7zm1 1h1v1h-1V8zM2 4h12v1H2V4zm0 7h12v1H2v-1z"/></svg>
+      </button>
+      <div class="espaco"></div>
+      <div id="claudes" title="Claudes rodando" hidden>✳<small>0</small></div>
+    </nav>
+
     <aside id="lateral">
-      <div id="raiz-nome"></div>
+      <div class="rot"><span class="seg on">pastas</span><span class="seg" id="raiz-nome"></span></div>
       <div id="arvore"></div>
     </aside>
     <div id="divisor-lateral" title="Arraste pra mudar a largura da lateral"></div>
 
-    <main id="direita">
-      <section id="editor-area">
+    <!-- a peça do arquivo: editor de texto, visor de mídia ou mesa de jogo -->
+    <section id="editor-area" hidden>
+      <div class="rot"><span class="seg on" id="tipo-peca">editor</span><span class="seg" id="nome-arquivo">bigorna</span></div>
+      <div class="rot rot-dir"><span class="seg" id="estado-arquivo"></span><span class="seg x" id="btn-fechar-arquivo" title="Fechar">×</span></div>
+      <div id="editor-corpo">
         <div id="editor"></div>
         <div id="visor" hidden></div>
         <div id="visor-doc" hidden></div>
         <div id="divisor-meio" title="Arraste pra mudar a divisão"></div>
-        <div id="vazio">
-          <img id="marca" src="bigorna.png" alt="" draggable="false">
-        </div>
-      </section>
-      <div id="divisor" title="Arraste pra mudar a altura do terminal"></div>
-      <section id="terminal-area">
-        <div id="colunas"></div>
-        <div id="shell-fim" hidden>
-          <p>nenhum terminal aberto</p>
-          <button id="btn-reabrir">abrir um novo</button>
-        </div>
-      </section>
+      </div>
+    </section>
+    <div id="divisor" title="Arraste pra mudar a largura do arquivo" hidden></div>
+
+    <!-- a base: o terminal fica com tudo que as peças não ocupam -->
+    <main id="terminal-area">
+      <div id="colunas"></div>
+      <div id="shell-fim" hidden>
+        <p>nenhum terminal aberto</p>
+        <button id="btn-reabrir">abrir um novo</button>
+      </div>
     </main>
   </div>
+
+  <!-- aviso curto, no canto de baixo, por cima de tudo -->
+  <div id="aviso" hidden></div>
 
   <!-- ordem importa: xterm antes do loader do Monaco (o loader confunde scripts UMD) -->
   <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
