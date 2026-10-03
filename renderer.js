@@ -1096,7 +1096,26 @@ let arquivoAberto = null;
 let salvarAgendado = null; // espera da gravação automática
 
 function monacoPronto() {
-  return new Promise((resolve) => require(['vs/editor/editor.main'], resolve));
+  return new Promise((resolve) => require(['vs/editor/editor.main'], () => {
+    ligarChecagem();
+    resolve();
+  }));
+}
+
+// Erro sublinhado enquanto se lê: o Monaco já traz de fábrica a checagem de
+// JS/TS, JSON, CSS e companhia — é só dizer o que vale. Em JS e TS fica só o
+// erro de escrita (chave não fechada, parêntese sobrando): a checagem de
+// sentido reclamaria do que existe, porque ela não enxerga o node_modules nem
+// o Node do projeto. JSON, CSS, SCSS e LESS vão completos, que é o padrão.
+// HTML não tem checagem no Monaco; linguagem sem checagem simplesmente não
+// sublinha nada.
+let checagemLigada = false;
+function ligarChecagem() {
+  if (checagemLigada) return;
+  checagemLigada = true;
+  const soEscrita = { noSemanticValidation: true, noSyntaxValidation: false, noSuggestionDiagnostics: true };
+  monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions(soEscrita);
+  monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions(soEscrita);
 }
 
 // Gravação automática: toda mudança salva sozinha (decisão do Matheus; desfazer
