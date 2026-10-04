@@ -800,6 +800,17 @@ async function atualizarFora() {
   pastaPedida = null;
 }
 
+// ---------- arquivo pedido por outro programa (abrir com a Bigorna) ----------
+// Desce a lateral até a pasta dele (se ela estiver na casa), abre no editor ou
+// no visor e marca a linha, como se tivesse sido clicado.
+async function abrirPedido(caminho) {
+  if (dentroDe(caminho, casa)) await revelarPasta(pastaDe(caminho), casa, $('arvore'));
+  await abrirArquivo(caminho);
+  const linha = [...document.querySelectorAll('#lateral .item')].find((el) => el.dados?.caminho === caminho);
+  if (linha && caminho === arquivoAberto) marcarAtivo(linha);
+}
+window.api.onAbrirArquivo((caminho) => abrirPedido(caminho));
+
 // O vigia avisou que uma pasta mudou (pode ter sido por fora da Bigorna).
 window.api.onPastaMudou((dir) => recarregarPasta(dir));
 
@@ -1981,4 +1992,6 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
   }
   await criarTerminal();
   atualizarTrilho();
+  const arquivo = await window.api.arquivoPedido();
+  if (arquivo) await abrirPedido(arquivo);
 })();

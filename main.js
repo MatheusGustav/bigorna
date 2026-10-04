@@ -2,9 +2,10 @@ const { app, BrowserWindow, Menu, ipcMain, dialog, net, shell: sistema } = requi
 const os = require('os');
 const path = require('path');
 const fs = require('fs/promises');
-const { watch: vigiar, statSync, constants: fsc } = require('fs');
+const { watch: vigiar, statSync, rmSync, readdirSync, constants: fsc } = require('fs');
 const { fileURLToPath } = require('url');
 const { execFile, spawn } = require('child_process');
+const net_ = require('net');
 const pty = require('node-pty');
 
 let win = null;
@@ -15,10 +16,10 @@ const shells = new Map(); // id do terminal (dado pela janela) → pty
 // terminal nessa pasta (sem ele, vale a pasta de onde a Bigorna foi aberta) e
 // `-e <comando…>` roda o comando no lugar do bash, fechando a janela quando ele sai.
 // Uma pasta solta (ou file://…) é o "abrir pasta" dos outros programas: o terminal
-// abre nela e a lateral desce até ela.
+// abre nela e a lateral desce até ela. Um arquivo solto vai pro editor (ou visor).
 function lerPedido() {
   const args = process.argv.slice(app.isPackaged ? 1 : 2);
-  const pedido = { pasta: process.cwd() !== '/' ? process.cwd() : null, comando: null, revelar: null };
+  const pedido = { pasta: process.cwd() !== '/' ? process.cwd() : null, comando: null, revelar: null, arquivo: null };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--workdir') pedido.pasta = args[++i] || pedido.pasta;
     else if (args[i].startsWith('--workdir=')) pedido.pasta = args[i].slice(10);
@@ -29,6 +30,7 @@ function lerPedido() {
       const info = statSync(alvo, { throwIfNoEntry: false });
       if (!info) continue;
       pedido.pasta = pedido.revelar = info.isDirectory() ? alvo : path.dirname(alvo);
+      pedido.arquivo = info.isDirectory() ? null : alvo;
     } else if (args[i] === '-e') {
       const resto = args.slice(i + 1);
       // Um texto só ("htop -d 5", com espaço ou |) vai pelo bash; vários já vêm separados.
@@ -41,6 +43,61 @@ function lerPedido() {
 }
 let pedido = lerPedido(); // vale só pro primeiro terminal; depois vira null
 const pastaPedida = pedido.revelar;
+const arquivoPedido = pedido.arquivo;
+
+// ---------- arquivo pedido vai pra janela que já está aberta ----------
+// Cada Bigorna aberta escuta numa tomada própria em /run/user/<id>/bigorna e,
+// ao ganhar o foco, anota que foi a última usada. Quem nasce só pra abrir um
+// arquivo entrega o caminho pra essa última e sai sem abrir janela; sem
+// ninguém pra receber, segue e abre a própria janela.
+const pastaDasTomadas = path.join(process.env.XDG_RUNTIME_DIR || os.tmpdir(), 'bigorna');
+const minhaTomada = path.join(pastaDasTomadas, process.pid + '.sock');
+const marcaDaUltima = path.join(pastaDasTomadas, 'ultima');
+
+async function entregarPraUltima(arquivo) {
+  const pid = (await fs.readFile(marcaDaUltima, 'utf8').catch(() => '')).trim();
+  if (!pid) return false;
+  return new Promise((resolve) => {
+    const ligacao = net_.connect(path.join(pastaDasTomadas, pid + '.sock'));
+    ligacao.setTimeout(1500, () => { ligacao.destroy(); resolve(false); });
+    ligacao.on('error', () => resolve(false));
+    ligacao.on('connect', () => ligacao.end(arquivo + '\n'));
+    ligacao.on('close', (erro) => resolve(!erro)); // fechou sem erro = a outra recebeu
+  });
+}
+
+function escutarPedidos() {
+  const tomada = net_.createServer((ligacao) => {
+    let texto = '';
+    ligacao.on('data', (d) => { texto += d; });
+    ligacao.on('end', () => {
+      const arquivo = texto.trim();
+      if (win && path.isAbsolute(arquivo)) {
+        win.webContents.send('abrir-arquivo', arquivo);
+        if (win.isMinimized()) win.restore();
+        win.focus();
+      }
+      ligacao.end();
+    });
+  });
+  tomada.on('error', () => {}); // sem tomada a janela funciona igual, só não recebe arquivo
+  // Tomada de Bigorna que caiu (fechada à força) fica pra trás: some aqui.
+  const vivo = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (const nome of readdirSync(pastaDasTomadas)) {
+    if (!nome.endsWith('.sock')) continue;
+    const pid = Number(nome.slice(0, -5));
+    if (pid === process.pid || !vivo(pid)) rmSync(path.join(pastaDasTomadas, nome), { force: true });
+  }
+  tomada.listen(minhaTomada);
+  app.on('will-quit', () => {
+    tomada.close();
+    rmSync(minhaTomada, { force: true });
+  });
+}
+
+function marcarComoUltima() {
+  fs.writeFile(marcaDaUltima, String(process.pid)).catch(() => {});
+}
 
 function criarJanela() {
   win = new BrowserWindow({
@@ -60,6 +117,9 @@ function criarJanela() {
   Menu.setApplicationMenu(null);
 
   win.loadFile('index.html');
+
+  win.on('focus', marcarComoUltima);
+  marcarComoUltima();
 
   win.on('closed', () => {
     win = null;
@@ -207,6 +267,7 @@ async function voltarPraPrincipal(repo) {
 
 ipcMain.handle('fs:home', () => os.homedir());
 ipcMain.handle('fs:pasta-pedida', () => pastaPedida);
+ipcMain.handle('fs:arquivo-pedido', () => arquivoPedido);
 
 // Terminal numa pasta fora da casa: de onde a metade de baixo da lateral começa.
 // Pendrive ou outro disco começa na pasta principal dele (onde ele foi montado);
@@ -585,6 +646,11 @@ ipcMain.handle('jogo:ler-ponto', async (_ev, jogo) => {
   return bytes ? { bytes } : { erro: 'sem ponto' };
 });
 
-app.whenReady().then(criarJanela);
+app.whenReady().then(async () => {
+  await fs.mkdir(pastaDasTomadas, { recursive: true }).catch(() => {});
+  if (arquivoPedido && !pedido.comando && await entregarPraUltima(arquivoPedido)) return app.exit(0);
+  escutarPedidos();
+  criarJanela();
+});
 
 app.on('window-all-closed', () => app.quit());
