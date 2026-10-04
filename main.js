@@ -9,6 +9,28 @@ const pty = require('node-pty');
 let win = null;
 const shells = new Map(); // id do terminal (dado pela janela) → pty
 
+// Pedido de quem abriu a Bigorna como terminal do sistema, do jeito que o KDE
+// e os outros programas pedem pro Konsole: `--workdir <pasta>` abre o primeiro
+// terminal nessa pasta (sem ele, vale a pasta de onde a Bigorna foi aberta) e
+// `-e <comando…>` roda o comando no lugar do bash, fechando a janela quando ele sai.
+function lerPedido() {
+  const args = process.argv.slice(app.isPackaged ? 1 : 2);
+  const pedido = { pasta: process.cwd() !== '/' ? process.cwd() : null, comando: null };
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--workdir') pedido.pasta = args[++i] || pedido.pasta;
+    else if (args[i].startsWith('--workdir=')) pedido.pasta = args[i].slice(10);
+    else if (args[i] === '-e') {
+      const resto = args.slice(i + 1);
+      // Um texto só ("htop -d 5", com espaço ou |) vai pelo bash; vários já vêm separados.
+      if (resto.length === 1) pedido.comando = ['/bin/bash', ['-c', resto[0]]];
+      else if (resto.length > 1) pedido.comando = [resto[0], resto.slice(1)];
+      break;
+    }
+  }
+  return pedido;
+}
+let pedido = lerPedido(); // vale só pro primeiro terminal; depois vira null
+
 function criarJanela() {
   win = new BrowserWindow({
     width: 1280,
@@ -38,16 +60,26 @@ function criarJanela() {
 // ---------- Terminal (pty = o "fio" que liga a tela ao bash de verdade) ----------
 
 ipcMain.handle('pty:spawn', async (_ev, id, cols, rows, pasta) => {
-  const programa = process.env.SHELL || '/bin/bash';
+  const inicio = pedido;
+  pedido = null;
+  if (!pasta && inicio) pasta = inicio.pasta;
+  const [programa, args] = inicio?.comando || [process.env.SHELL || '/bin/bash', []];
   const dentroDe = pasta && path.isAbsolute(pasta)
     && await fs.stat(pasta).then((e) => e.isDirectory(), () => false);
-  const p = pty.spawn(programa, [], {
-    name: 'xterm-256color',
-    cols: cols || 80,
-    rows: rows || 24,
-    cwd: dentroDe ? pasta : os.homedir(),
-    env: process.env,
-  });
+  let p;
+  try {
+    p = pty.spawn(programa, args, {
+      name: 'xterm-256color',
+      cols: cols || 80,
+      rows: rows || 24,
+      cwd: dentroDe ? pasta : os.homedir(),
+      env: process.env,
+    });
+  } catch (erro) {
+    console.log('[pty] não abriu', programa, erro.message);
+    if (inicio?.comando && win) win.close();
+    return false;
+  }
   shells.set(id, p);
   console.log('[pty] terminal', id, 'aberto: pid', p.pid, 'tamanho', cols, 'x', rows);
   p.onData((data) => {
@@ -56,6 +88,7 @@ ipcMain.handle('pty:spawn', async (_ev, id, cols, rows, pasta) => {
   p.onExit(({ exitCode, signal }) => {
     console.log('[pty] terminal', id, 'encerrou: código', exitCode, 'sinal', signal);
     shells.delete(id);
+    if (inicio?.comando) { if (win) win.close(); return; }
     if (win) win.webContents.send('pty:exit', id, exitCode);
   });
   return true;

@@ -1,12 +1,11 @@
 {
   "name": "bigorna",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Terminal com editor, pastas e (depois) joguinhos",
   "main": "main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron .",
-    "instalar": "bash instalar.sh",
     "empacotar": "electron-builder --linux"
   },
   "keywords": [],

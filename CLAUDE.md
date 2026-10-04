@@ -24,6 +24,7 @@ Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico
 - **Botão direito na aba**: mostrar ao lado (a aba vira uma coluna nova), mover pra coluna da esquerda/direita, abrir worktree da branch, renomear a aba (apagar o nome devolve o automático) e fechar o terminal.
 - **Abrir worktree**: o git não deixa a mesma branch em duas pastas, então a branch muda de casa — a pasta principal volta pra main (ou master), onde ela sempre fica, a branch passa a morar em `<repo>-<branch>` ao lado dela e um terminal novo já abre lá, no mesmo grupo de abas. Só a pasta principal faz isso: na main/master o item fica apagado, e numa aba de worktree ele avisa. Com arquivo mexido sem commit, não faz nada e avisa na barra de cima.
 - **Teclas capturadas (nada além disso; o resto vai inteiro pro bash)**: Ctrl+J esconde/mostra o terminal, Ctrl+Shift+C/V copia/cola no terminal, Ctrl+S só com o editor em foco.
+- **Terminal do sistema**: é o terminal padrão do KDE e abre no Ctrl+Alt+T. Entende o que os programas pedem pro Konsole: `--workdir <pasta>` abre o primeiro terminal ali (sem ele, vale a pasta de onde foi chamada) e `-e <comando>` roda o comando no lugar do bash, fechando a janela quando ele termina.
 - Botão direito na lateral: menu no estilo do Dolphin (abrir com, renomear, lixeira, zip, transcrever áudio…).
 
 ## Avisos
@@ -31,7 +32,7 @@ Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico
 - Não abre por SSH — servidor remoto continua no terminal comum.
 - Licença **PolyForm Noncommercial 1.0.0** (`LICENSE.md`); repositório público em MatheusGustav/bigorna.
 - Rodar: `npm start`. Sem suíte de testes; conferir é abrir e usar.
-- **Instalada x projeto**: o menu do sistema abre a cópia de `~/.local/opt/bigorna`, não esta pasta. Mexer aqui não muda a instalada; `npm run instalar` copia a versão atual pra lá (as configurações em `~/.config/bigorna` são as mesmas pras duas).
+- **Instalada x projeto**: o menu do sistema abre o pacote instalado em `/opt/Bigorna`, não esta pasta. Mexer aqui não muda a instalada. `npm run empacotar` gera o `.rpm` e o AppImage em `dist/` (fora do git), e a versão nova entra com `sudo dnf install` do `.rpm`. As configurações em `~/.config/bigorna` são as mesmas pras duas.
 
 ## Memórias do projeto
 
