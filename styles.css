@@ -276,8 +276,10 @@ button { font: inherit; }
   grid-template-areas: 'prat' 'jogo' 'atalhos';
   grid-template-rows: minmax(0, 1fr) auto auto;
 }
-/* na coluna inteira dele não há terminal pra mostrar */
+/* na coluna inteira dele não há terminal pra mostrar; o respiro a mais em
+   cima tira o rótulo da prateleira de baixo da aba */
 .coluna.fl-inteira .terminais { display: none; }
+.coluna.fl-inteira .fliperama { margin-top: 26px; }
 .fliperama.metade {
   flex: 0 0 42%; /* o tamanho de partida; a divisa arrasta */
   grid-template-areas: 'jogo prat' 'jogo atalhos';
