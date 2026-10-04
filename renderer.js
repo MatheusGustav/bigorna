@@ -616,6 +616,7 @@ function desenharAbas() {
     col.listaEl.replaceChildren(novas);
   }
   arrumarFliperama(); // em pé ou deitado, conforme a coluna dele tenha terminal
+  atualizarFora(); // o terminal da vez pode ter mudado de pasta, ou outro virou a vez
 }
 
 // ============================================================
@@ -698,6 +699,7 @@ async function montarPasta(dir, recipiente, nivel) {
   const reabrir = [];
   for (const { name, isDir } of itens) {
     const caminho = dir.replace(/\/$/, '') + '/' + name;
+    if (caminho === casa) continue; // a casa já tem a metade de cima; na de baixo ela não entra
     const linha = linhaDaArvore(caminho, name, isDir, nivel);
     novas.appendChild(linha);
 
@@ -741,6 +743,63 @@ async function alternarPasta(linha, abrir) {
   }
 }
 
+// Abre a árvore, pasta por pasta, de `raiz` até `alvo`, e rola até ele aparecer.
+async function revelarPasta(alvo, raiz, recipiente) {
+  if (!alvo || alvo === raiz || !alvo.startsWith(raiz.replace(/\/$/, '') + '/')) return;
+  let linha = null;
+  let caminho = raiz.replace(/\/$/, '');
+  for (const nome of alvo.slice(caminho.length + 1).split('/')) {
+    caminho += '/' + nome;
+    linha = [...recipiente.children].find((el) => el.dados?.caminho === caminho);
+    if (!linha?.dados.ehPasta) return;
+    await alternarPasta(linha, true);
+    recipiente = linha.dados.filhos;
+  }
+  // A janela recém-aberta ainda cresce (maximizar vem depois): até assentar,
+  // cada mudança de tamanho centraliza de novo.
+  const centrar = () => linha.scrollIntoView({ block: 'center' });
+  centrar();
+  const vigia = new ResizeObserver(centrar);
+  vigia.observe(linha.closest('#arvore, #arvore-fora'));
+  setTimeout(() => vigia.disconnect(), 1500);
+}
+
+// ---------- metade de baixo: o que está fora da casa ----------
+// O terminal da vez saiu da casa (abriram um pendrive, ou foi um cd): a lateral
+// se divide e embaixo mostra de onde ele está. Voltou pra casa, ela some.
+
+let pastaPedida = null; // a pasta que outro programa pediu pra abrir, até ser mostrada
+let raizFora = null;
+let cwdFora = null; // a última pasta de fora conferida, pra não perguntar de novo
+
+function limparFora() {
+  for (const c of [...pastasLidas.keys()]) if (!dentroDe(c, casa)) pastasLidas.delete(c);
+  $('arvore-fora').replaceChildren();
+}
+
+async function atualizarFora() {
+  const cwd = terminais.get(terminalAtivo)?.info?.cwd;
+  if (!cwd || dentroDe(cwd, casa)) {
+    cwdFora = null;
+    if (raizFora === null) return;
+    raizFora = null;
+    $('fora').hidden = true;
+    return limparFora();
+  }
+  if (cwd === cwdFora) return;
+  cwdFora = cwd;
+  const raiz = await window.api.raizDeFora(cwd).catch(() => cwd);
+  if (cwdFora !== cwd || raiz === raizFora) return; // mudou enquanto esperava, ou já está à mostra
+  raizFora = raiz;
+  limparFora();
+  $('fora-nome').textContent = raiz;
+  $('fora').hidden = false;
+  pastasLidas.set(raiz, { recipiente: $('arvore-fora'), nivel: 0 });
+  await montarPasta(raiz, $('arvore-fora'), 0);
+  if (dentroDe(pastaPedida, raiz)) await revelarPasta(pastaPedida, raiz, $('arvore-fora'));
+  pastaPedida = null;
+}
+
 // O vigia avisou que uma pasta mudou (pode ter sido por fora da Bigorna).
 window.api.onPastaMudou((dir) => recarregarPasta(dir));
 
@@ -748,8 +807,16 @@ window.api.onPastaMudou((dir) => recarregarPasta(dir));
 async function recarregarPasta(dir) {
   const lida = pastasLidas.get(dir);
   if (!lida) return; // ainda não foi aberta: vai ser lida quando abrir
-  for (const c of pastasLidas.keys()) if (c.startsWith(dir + '/')) pastasLidas.delete(c);
+  // Relendo uma pasta da metade de baixo (como /home), o que é da casa fica: é da metade de cima.
+  for (const c of pastasLidas.keys()) {
+    if (c.startsWith(dir + '/') && (dentroDe(dir, casa) || !dentroDe(c, casa))) pastasLidas.delete(c);
+  }
+  // Relendo, a lista encolhe e cresce de novo enquanto reabre as pastas; sem
+  // guardar onde estava, ela pularia de lugar.
+  const caixa = lida.recipiente.closest('#arvore, #arvore-fora');
+  const onde = caixa && caixa.scrollTop;
   await montarPasta(dir, lida.recipiente, lida.nivel);
+  if (caixa) caixa.scrollTop = onde;
 }
 
 $('btn-lateral').addEventListener('click', () => {
@@ -910,7 +977,7 @@ function itensDoMenu(linha, opcoes) {
   ].filter(Boolean);
 }
 
-$('arvore').addEventListener('contextmenu', async (ev) => {
+$('lateral').addEventListener('contextmenu', async (ev) => {
   const linha = ev.target.closest('.item');
   if (!linha || !linha.dados || linha.querySelector('input')) return;
   ev.preventDefault();
@@ -1907,6 +1974,11 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
   $('raiz-nome').textContent = casa;
   pastasLidas.set(casa, { recipiente: $('arvore'), nivel: 0 });
   await montarPasta(casa, $('arvore'), 0);
+  pastaPedida = await window.api.pastaPedida();
+  if (dentroDe(pastaPedida, casa)) {
+    await revelarPasta(pastaPedida, casa, $('arvore'));
+    pastaPedida = null;
+  }
   await criarTerminal();
   atualizarTrilho();
 })();

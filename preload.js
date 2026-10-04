@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // arquivos
   home: () => ipcRenderer.invoke('fs:home'),
+  pastaPedida: () => ipcRenderer.invoke('fs:pasta-pedida'),
+  raizDeFora: (pasta) => ipcRenderer.invoke('fs:raiz-de-fora', pasta),
   temaDeIcones: () => ipcRenderer.invoke('icones:tema'),
   listDir: (dir) => ipcRenderer.invoke('fs:list', dir),
   readFile: (arquivo) => ipcRenderer.invoke('fs:read', arquivo),

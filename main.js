@@ -2,7 +2,8 @@ const { app, BrowserWindow, Menu, ipcMain, dialog, net, shell: sistema } = requi
 const os = require('os');
 const path = require('path');
 const fs = require('fs/promises');
-const { watch: vigiar } = require('fs');
+const { watch: vigiar, statSync, constants: fsc } = require('fs');
+const { fileURLToPath } = require('url');
 const { execFile, spawn } = require('child_process');
 const pty = require('node-pty');
 
@@ -13,13 +14,22 @@ const shells = new Map(); // id do terminal (dado pela janela) → pty
 // e os outros programas pedem pro Konsole: `--workdir <pasta>` abre o primeiro
 // terminal nessa pasta (sem ele, vale a pasta de onde a Bigorna foi aberta) e
 // `-e <comando…>` roda o comando no lugar do bash, fechando a janela quando ele sai.
+// Uma pasta solta (ou file://…) é o "abrir pasta" dos outros programas: o terminal
+// abre nela e a lateral desce até ela.
 function lerPedido() {
   const args = process.argv.slice(app.isPackaged ? 1 : 2);
-  const pedido = { pasta: process.cwd() !== '/' ? process.cwd() : null, comando: null };
+  const pedido = { pasta: process.cwd() !== '/' ? process.cwd() : null, comando: null, revelar: null };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--workdir') pedido.pasta = args[++i] || pedido.pasta;
     else if (args[i].startsWith('--workdir=')) pedido.pasta = args[i].slice(10);
-    else if (args[i] === '-e') {
+    else if (!args[i].startsWith('-')) {
+      let alvo = args[i];
+      try { if (alvo.startsWith('file://')) alvo = fileURLToPath(alvo); } catch { continue; }
+      alvo = path.resolve(alvo);
+      const info = statSync(alvo, { throwIfNoEntry: false });
+      if (!info) continue;
+      pedido.pasta = pedido.revelar = info.isDirectory() ? alvo : path.dirname(alvo);
+    } else if (args[i] === '-e') {
       const resto = args.slice(i + 1);
       // Um texto só ("htop -d 5", com espaço ou |) vai pelo bash; vários já vêm separados.
       if (resto.length === 1) pedido.comando = ['/bin/bash', ['-c', resto[0]]];
@@ -30,6 +40,7 @@ function lerPedido() {
   return pedido;
 }
 let pedido = lerPedido(); // vale só pro primeiro terminal; depois vira null
+const pastaPedida = pedido.revelar;
 
 function criarJanela() {
   win = new BrowserWindow({
@@ -65,7 +76,8 @@ ipcMain.handle('pty:spawn', async (_ev, id, cols, rows, pasta) => {
   if (!pasta && inicio) pasta = inicio.pasta;
   const [programa, args] = inicio?.comando || [process.env.SHELL || '/bin/bash', []];
   const dentroDe = pasta && path.isAbsolute(pasta)
-    && await fs.stat(pasta).then((e) => e.isDirectory(), () => false);
+    && await fs.stat(pasta).then((e) => e.isDirectory(), () => false)
+    && await fs.access(pasta, fsc.X_OK).then(() => true, () => false); // pasta sem permissão de entrar mata o bash
   let p;
   try {
     p = pty.spawn(programa, args, {
@@ -194,6 +206,23 @@ async function voltarPraPrincipal(repo) {
 // ---------- Arquivos (lateral de pastas e editor) ----------
 
 ipcMain.handle('fs:home', () => os.homedir());
+ipcMain.handle('fs:pasta-pedida', () => pastaPedida);
+
+// Terminal numa pasta fora da casa: de onde a metade de baixo da lateral começa.
+// Pendrive ou outro disco começa na pasta principal dele (onde ele foi montado);
+// pasta do próprio sistema, como /etc, começa nela mesma.
+ipcMain.handle('fs:raiz-de-fora', async (_ev, pasta) => {
+  const dentro = (c, p) => c === p || c.startsWith(p === '/' ? '/' : p + '/');
+  let ponto = '/';
+  const tabela = await fs.readFile('/proc/self/mountinfo', 'utf8').catch(() => '');
+  for (const linha of tabela.split('\n')) {
+    const campo = linha.split(' ')[4];
+    if (!campo) continue;
+    const montagem = campo.replace(/\\([0-7]{3})/g, (_m, o) => String.fromCharCode(parseInt(o, 8)));
+    if (dentro(pasta, montagem) && montagem.length > ponto.length) ponto = montagem;
+  }
+  return ponto !== '/' && !dentro(os.homedir(), ponto) ? ponto : pasta;
+});
 
 ipcMain.handle('fs:list', async (_ev, dir) => {
   const itens = await fs.readdir(dir, { withFileTypes: true });
