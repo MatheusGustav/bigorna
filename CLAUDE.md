@@ -31,6 +31,7 @@ Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico
 - Não abre por SSH — servidor remoto continua no terminal comum.
 - Licença **PolyForm Noncommercial 1.0.0** (`LICENSE.md`); repositório público em MatheusGustav/bigorna.
 - Rodar: `npm start`. Sem suíte de testes; conferir é abrir e usar.
+- **Instalada x projeto**: o menu do sistema abre a cópia de `~/.local/opt/bigorna`, não esta pasta. Mexer aqui não muda a instalada; `npm run instalar` copia a versão atual pra lá (as configurações em `~/.config/bigorna` são as mesmas pras duas).
 
 ## Memórias do projeto
 

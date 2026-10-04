@@ -5,22 +5,60 @@
   "main": "main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "electron ."
+    "start": "electron .",
+    "instalar": "bash instalar.sh",
+    "empacotar": "electron-builder --linux"
   },
   "keywords": [],
-  "author": "",
+  "author": {
+    "name": "Matheus Gustav",
+    "email": "265953245+MatheusGustav@users.noreply.github.com"
+  },
   "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
-    "electron": "^44.5.1",
     "material-icon-theme": "^5.39.0",
     "monaco-editor": "^0.57.0",
     "node-pty": "^1.1.0",
     "nostalgist": "^0.22.0"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.2.0"
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "homepage": "https://github.com/MatheusGustav/bigorna",
+  "desktopName": "bigorna.desktop",
+  "build": {
+    "appId": "io.github.matheusgustav.bigorna",
+    "productName": "Bigorna",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "styles.css",
+      "bigorna.png",
+      "fontes/**",
+      "LICENSE.md"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "rpm"
+      ],
+      "category": "System;TerminalEmulator",
+      "icon": "build/icon.png",
+      "executableName": "bigorna",
+      "desktop": {
+        "entry": {
+          "Name": "Bigorna",
+          "Comment": "Terminal com editor, pastas e abas por repositório",
+          "StartupWMClass": "bigorna"
+        }
+      }
+    }
   }
 }
