@@ -14,7 +14,7 @@ const OPCOES_DO_TERMINAL = {
   theme: {
     background: '#0a0a0a',
     foreground: '#e6e6e6',
-    cursor: '#ff8a3d',
+    cursor: '#ffffff',
     selectionBackground: '#3a3a3a',
   },
 };
@@ -577,11 +577,6 @@ function desenharAbas() {
   // redesenhar com a caixa de renomear aberta apagaria o que está sendo
   // digitado; no meio de um arrasto, sumiria com a aba da mão do mouse
   if ($('colunas').querySelector('.abas input') || arrastandoAba !== null) return;
-
-  // O trilho soma os Claudes de todas as abas.
-  const claudes = [...terminais.values()].filter((t) => t.info && t.info.programa === 'claude').length;
-  $('claudes').hidden = claudes === 0;
-  $('claudes').querySelector('small').textContent = claudes;
 
   for (const col of colunas) {
     col.el.classList.toggle('foco', col === colunaAtiva);

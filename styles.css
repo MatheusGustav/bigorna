@@ -9,7 +9,7 @@
   --borda-2: #333333;
   --texto: #e6e6e6;
   --texto-fraco: #7d7d7d;
-  --brasa: #ff8a3d;
+  --brasa: #ffffff;
   --mono: "JetBrains Mono", ui-monospace, monospace;
   --pixel: "Silkscreen", var(--mono);
 }
@@ -144,15 +144,12 @@ button { font: inherit; }
 .ferramenta:hover::after { display: block; }
 #trilho .espaco { flex: 1; }
 /* quantos Claudes estão rodando, somados de todas as abas */
-#claudes {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
+#selo {
+  width: 28px;
+  height: 28px;
+  flex: none;
   color: var(--brasa);
-  font-size: 11px;
 }
-#claudes small { color: var(--texto-fraco); font-size: 9px; }
 
 /* ---------- lateral de pastas: desliza ao abrir e fechar, largura ajustável ---------- */
 #lateral {
