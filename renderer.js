@@ -110,6 +110,7 @@ function criarColunaEm(indice) {
 }
 
 function removerColuna(col) {
+  if (temFliperama(col)) return; // a casa do fliperama fica: ele toma a coluna inteira
   const i = colunas.indexOf(col);
   if (i < 0 || colunas.length < 2) return; // a última fica, mesmo vazia
   colunas.splice(i, 1);
@@ -493,7 +494,7 @@ function fecharTerminal(id, jaEncerrou) {
     if (prox) return ativarTerminal(prox); // ele já redesenha as abas
   }
   desenharAbas();
-  if (!terminais.size) $('shell-fim').hidden = false;
+  if (!terminais.size && !fliperama) $('shell-fim').hidden = false;
 }
 
 window.api.onPtyData((id, data) => {
@@ -611,8 +612,10 @@ function desenharAbas() {
       novas.appendChild(grupo);
     }
     for (const id of soltas) novas.appendChild(abaDoTerminal(id));
+    if (temFliperama(col)) novas.appendChild(abaDoFliperama());
     col.listaEl.replaceChildren(novas);
   }
+  arrumarFliperama(); // em pé ou deitado, conforme a coluna dele tenha terminal
 }
 
 // ============================================================
@@ -708,6 +711,12 @@ async function montarPasta(dir, recipiente, nivel) {
     } else {
       if (caminho === arquivoAberto) marcarAtivo(linha);
       linha.addEventListener('click', () => {
+        // Jogo não passa pelo editor: liga o fliperama na área dos terminais.
+        // Clicar de novo no que está rodando desliga, como nos outros arquivos.
+        if (tipoDeMidia(name) === 'jogo') {
+          if (fliperama && (jogoAtual === caminho || jogoPedido === caminho)) return fecharFliperama();
+          return abrirFliperama(caminho);
+        }
         // Clicar no arquivo que já está na tela fecha ele (decisão do Matheus).
         if (caminho === arquivoAberto) return fecharArquivo();
         abrirArquivo(caminho);
@@ -1207,15 +1216,6 @@ function enderecoDoArquivo(caminho) {
 // Para o som e esvazia o visor. Tirar o src solta o arquivo de verdade: só
 // remover o elemento deixaria o áudio tocando até a limpeza de memória passar.
 function limparVisor() {
-  // O emulador precisa ser desligado por dentro: só tirar o canvas da tela
-  // deixaria o jogo rodando e consumindo máquina no escuro.
-  if (jogo) {
-    jogo.exit();
-    jogo = null;
-  }
-  jogoPedido = null;
-  jogoAtual = null;
-  $('editor-area').classList.remove('dividido');
   const tocando = $('visor').querySelector('audio, video');
   if (tocando) {
     tocando.pause();
@@ -1240,43 +1240,10 @@ function visorNaFrente(caminho) {
   mostrarPeca(true);
 }
 
-// O visor da esquerda: com um jogo rodando, a mídia abre nele em vez de
-// tomar a tela do jogo — documento e partida convivem, metade pra cada um.
-function limparVisorDoc() {
-  const tocando = $('visor-doc').querySelector('audio, video');
-  if (tocando) {
-    tocando.pause();
-    tocando.removeAttribute('src');
-  }
-  $('visor-doc').replaceChildren();
-  $('visor-doc').hidden = true;
-}
-
 async function abrirMidia(caminho, tipo) {
-  const aoLado = !!jogo; // jogo rodando: a mídia vai pra metade esquerda e ele continua
-  let alvo;
-  if (aoLado) {
-    limparVisorDoc();
-    salvarAgora();
-    if (editor) {
-      const modelo = editor.getModel();
-      editor.setModel(null);
-      if (modelo) modelo.dispose();
-    }
-    $('editor').classList.add('escondido');
-    $('editor-area').classList.add('dividido');
-    alvo = $('visor-doc');
-    alvo.hidden = false;
-    arquivoAberto = caminho;
-    $('nome-arquivo').textContent = caminho;
-    $('estado-arquivo').textContent = '';
-    atualizarTrilho();
-  } else {
-    limparVisor();
-    limparVisorDoc();
-    visorNaFrente(caminho);
-    alvo = $('visor');
-  }
+  limparVisor();
+  visorNaFrente(caminho);
+  const alvo = $('visor');
 
   const endereco = enderecoDoArquivo(caminho);
   let el;
@@ -1312,13 +1279,17 @@ async function abrirMidia(caminho, tipo) {
   atualizarTrilho(); // agora o visor tem o que acender
 }
 
-// ---------- Mesa de jogo: o console no meio, a prateleira ao lado ----------
+// ---------- Fliperama: o console mora na área dos terminais ----------
 // O arquivo do jogo é a fita; o emulador ("core") é o aparelho que lê ela.
 // Cada console tem o seu, e a extensão do arquivo diz qual chamar. O core é
 // baixado uma vez pelo processo principal e fica guardado — daí em diante o
 // jogo abre sem internet.
-// A tela do console é quase quadrada e a área é larga, então sobra espaço dos
-// dois lados: à esquerda os comandos, à direita os jogos da pasta ~/Jogos.
+// O fliperama entra sempre pela direita, com uma aba própria na barra da
+// coluna. Com uma coluna só, ele vira uma coluna nova ao lado dela, em pé:
+// prateleira em cima, tela embaixo, atalhos no pé. Com terminal na coluna
+// dele, entra na metade de baixo, deitado: tela à esquerda, prateleira e
+// atalhos à direita, com a divisa arrastável. Fechar o último terminal da
+// coluna devolve a coluna inteira pra ele.
 
 const CORE_DO_JOGO = [
   [/\.(sfc|smc|fig)$/i, 'snes9x'],              // Super Nintendo
@@ -1338,6 +1309,9 @@ const FORMATO_DA_TELA = {
 let jogo = null;       // emulador rodando agora, se houver
 let jogoPedido = null; // arquivo que está sendo preparado (o clique pode mudar no meio)
 let jogoAtual = null;  // o que está rodando: é dele o ponto que se salva
+let fliperama = null;  // o aparelho na tela: { col, el, divisa, tela, rotulo, prateleira }
+
+const temFliperama = (col) => !!fliperama && fliperama.col === col;
 
 // O ponto fica em disco, um por jogo. Sair guarda; abrir de novo continua dali.
 async function guardarPonto() {
@@ -1348,13 +1322,22 @@ async function guardarPonto() {
   return !r.erro;
 }
 
-async function voltarAoPonto(tela) {
+async function voltarAoPonto() {
   if (!jogo || !jogoAtual) return false;
   const r = await window.api.lerPonto(jogoAtual).catch(() => ({ erro: 'ler' }));
   if (r.erro) return false;
   await jogo.loadState(r.bytes);
-  if (tela) tela.focus();
+  if (fliperama) fliperama.tela.focus();
   return true;
+}
+
+// O emulador precisa ser desligado por dentro: só tirar o canvas da tela
+// deixaria o jogo rodando e consumindo máquina no escuro.
+function desligarEmulador(opcoes) {
+  if (jogo) jogo.exit(opcoes);
+  jogo = null;
+  jogoPedido = null;
+  jogoAtual = null;
 }
 
 function pedacoDaMesa(classe, texto) {
@@ -1364,7 +1347,7 @@ function pedacoDaMesa(classe, texto) {
   return el;
 }
 
-// O nome da caixa, escrito em cima da linha da moldura: [comandos], [jogo]…
+// O nome da caixa, escrito em cima da linha da moldura: [atalhos], [jogo]…
 function rotuloDaMesa(nome, detalhe) {
   const rot = document.createElement('div');
   rot.className = 'rot';
@@ -1401,24 +1384,77 @@ function botaoDaMesa(texto, aoClicar, tecla) {
   return b;
 }
 
-// Abre a tela de jogo. Sem arquivo, mostra só a prateleira — é o que o clique
-// na bigorna faz: liga o videogame e deixa escolher o que jogar.
-async function abrirMesaDeJogo(caminho) {
-  limparVisor();
-  $('editor-area').classList.remove('dividido');
-  visorNaFrente(caminho || 'jogos');
+// A coluna onde o fliperama entra: a última, se já houver mais de uma (ou se
+// ela estiver sem terminal); senão uma nova, à direita da única que existe.
+function colunaDoFliperama() {
+  const ultima = colunas[colunas.length - 1];
+  if (ultima && (colunas.length > 1 || !idsDaColuna(ultima).length)) return ultima;
+  return criarColuna();
+}
 
-  const mesa = pedacoDaMesa('mesa');
+// Em pé ou deitado, conforme a coluna tenha ou não terminal. Chamado pelo
+// desenharAbas, que já roda a cada mudança de terminal ou de coluna.
+function arrumarFliperama() {
+  if (!fliperama) return;
+  const { col, el, divisa } = fliperama;
+  const metade = idsDaColuna(col).length > 0;
+  el.classList.toggle('metade', metade);
+  col.el.classList.toggle('fl-inteira', !metade);
+  divisa.hidden = !metade;
+  if (!metade) el.style.flexBasis = ''; // a altura arrastada era da metade
+  ajustarTela();
+}
+
+// A aba do fliperama na barra da coluna, igual às dos terminais. Fica ativa
+// (entre colchetes) com o teclado dentro dele.
+function abaDoFliperama() {
+  const aba = document.createElement('span');
+  const focado = fliperama.el.contains(document.activeElement);
+  aba.className = 'aba' + (focado ? ' ativa' : '');
+  const titulo = Object.assign(document.createElement('span'), {
+    className: 'titulo',
+    textContent: nomeDoJogo(jogoAtual || jogoPedido) || 'fliperama',
+  });
+  aba.appendChild(titulo);
+  const x = document.createElement('span');
+  x.className = 'x';
+  x.textContent = '×';
+  x.title = 'Sair do jogo (salva o ponto)';
+  x.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    fecharFliperama();
+  });
+  aba.appendChild(x);
+  aba.addEventListener('click', () => fliperama.tela.focus());
+  return aba;
+}
+
+// Liga o aparelho. Sem arquivo, mostra só a prateleira — é o que o botão do
+// trilho faz: liga o videogame e deixa escolher o que jogar. Já ligado, só
+// troca a fita.
+async function abrirFliperama(caminho) {
+  if (fliperama) {
+    if (caminho) await rodarJogo(caminho);
+    else fliperama.tela.focus();
+    return;
+  }
+  if ($('terminal-area').hidden) alternarTerminal(); // a casa dele estava escondida (Ctrl+J)
+
+  const el = pedacoDaMesa('fliperama');
   const tela = document.createElement('canvas');
   tela.className = 'jogo';
   tela.tabIndex = 0; // sem isso o canvas não recebe foco, e o teclado não chega no jogo
   tela.width = 256;  // tamanho de partida com a proporção de um console;
   tela.height = 224; // o emulador troca pelo tamanho real quando o jogo sobe
 
-  const comandos = pedacoDaMesa('mesa-lado');
-  comandos.append(rotuloDaMesa('comandos'));
-  const itens = pedacoDaMesa('mesa-itens'); // a parte que rola; o rótulo fica fora dela
-  comandos.append(itens);
+  const caixaDoJogo = pedacoDaMesa('fl-jogo');
+  const rotulo = rotuloDaMesa('jogo', 'escolha um na prateleira');
+  caixaDoJogo.append(rotulo, tela);
+
+  const atalhos = pedacoDaMesa('fl-atalhos');
+  atalhos.append(rotuloDaMesa('atalhos'));
+  const itens = pedacoDaMesa('fl-linha');
+  atalhos.append(itens);
   itens.append(
     botaoDaMesa('pausar', (ev) => {
       if (!jogo) return;
@@ -1432,81 +1468,144 @@ async function abrirMesaDeJogo(caminho) {
       tela.focus();
     }, 's'),
     botaoDaMesa('voltar', async () => {
-      if (!await voltarAoPonto(tela)) avisar('nenhum ponto salvo ainda');
+      if (!await voltarAoPonto()) avisar('nenhum ponto salvo ainda');
       tela.focus();
     }, 'v'),
     botaoDaMesa('recomeçar', () => { if (jogo) { jogo.restart(); tela.focus(); } }, 'r'),
-    botaoDaMesa('sair (salva)', async () => {
-      await guardarPonto(); // sair sem perder o que estava jogando
-      fecharArquivo();
-    }, 'q'),
+    botaoDaMesa('sair (salva)', () => fecharFliperama(), 'q'),
   );
 
-  // Ctrl + letra aciona o comando sem tirar a mão do jogo. Só vale com o
-  // teclado dentro da mesa (tela do jogo ou prateleira): no terminal e no
-  // editor, Ctrl+R, Ctrl+S e companhia continuam sendo deles.
+  // Ctrl + letra aciona o atalho sem tirar a mão do jogo. Só vale com o
+  // teclado dentro do fliperama (tela do jogo ou prateleira): no terminal e
+  // no editor, Ctrl+R, Ctrl+S e companhia continuam sendo deles.
   const porTecla = new Map([...itens.children].filter((b) => b.tecla).map((b) => [b.tecla, b]));
-  const atalhoDaMesa = (ev) => {
-    if (!mesa.isConnected) return window.removeEventListener('keydown', atalhoDaMesa, true);
-    if (!ev.ctrlKey || ev.shiftKey || ev.altKey || !mesa.contains(document.activeElement)) return;
+  const atalhoDoFliperama = (ev) => {
+    if (!el.isConnected) return window.removeEventListener('keydown', atalhoDoFliperama, true);
+    if (!ev.ctrlKey || ev.shiftKey || ev.altKey || !el.contains(document.activeElement)) return;
     const botao = porTecla.get(ev.key.toLowerCase());
     if (!botao) return;
     ev.preventDefault();
     ev.stopPropagation();
     botao.click();
   };
-  window.addEventListener('keydown', atalhoDaMesa, true);
+  window.addEventListener('keydown', atalhoDoFliperama, true);
 
-  const centro = pedacoDaMesa('mesa-centro');
-  centro.append(rotuloDaMesa('jogo', nomeDoJogo(caminho)), tela);
-  new ResizeObserver(() => ajustarTela(tela)).observe(centro);
+  const prateleira = pedacoDaMesa('fl-prateleira');
+  el.append(prateleira, caixaDoJogo, atalhos);
 
-  const prateleira = pedacoDaMesa('mesa-lado');
-  mesa.append(comandos, centro, prateleira);
-  $('visor').append(mesa);
-  atualizarTrilho(); // a mesa está na tela: o fliperama acende
+  // A divisa entre o terminal de cima e o fliperama: só aparece na metade.
+  const divisa = document.createElement('div');
+  divisa.className = 'divisa-linha';
+  divisa.title = 'Arraste pra mudar a altura';
+  divisa.addEventListener('mousedown', arrastarDivisaDaLinha);
 
-  encherPrateleira(prateleira, tela, caminho);
-  if (caminho) await rodarJogo(caminho, tela);
+  const col = colunaDoFliperama();
+  fliperama = { col, el, divisa, tela, rotulo: rotulo.lastElementChild, prateleira };
+  col.el.append(divisa, el);
+  $('shell-fim').hidden = true;
+
+  // O teclado no fliperama acende a aba dele e a moldura da coluna.
+  el.addEventListener('focusin', () => {
+    colunaAtiva = col;
+    desenharAbas();
+  });
+  el.addEventListener('focusout', () => setTimeout(desenharAbas));
+
+  // O espaço mudou de tamanho ou de forma: a tela se reencaixa.
+  new ResizeObserver(() => ajustarTela()).observe(el);
+
+  desenharAbas(); // põe a aba e arruma em pé ou deitado
+  atualizarTrilho();
+  await encherPrateleira(caminho);
+  if (caminho) await rodarJogo(caminho);
+  else tela.focus();
+}
+
+// Desliga o aparelho guardando o ponto. A coluna só dele vai embora junto;
+// com terminal em cima, o terminal fica com a coluna inteira.
+async function fecharFliperama() {
+  if (!fliperama) return;
+  await guardarPonto();
+  desligarEmulador();
+  const { col, el, divisa } = fliperama;
+  fliperama = null;
+  el.remove();
+  divisa.remove();
+  col.el.classList.remove('fl-inteira');
+  if (!idsDaColuna(col).length) {
+    col.ativo = null;
+    removerColuna(col); // se era a última coluna, ela fica, vazia
+  }
+  desenharAbas();
+  atualizarTrilho();
+  if (!terminais.size) return void ($('shell-fim').hidden = false);
+  const t = terminalDaVez();
+  if (t && !$('terminal-area').hidden) t.term.focus();
+}
+
+// Arrastar a divisa muda quanto da coluna é do terminal e quanto é do jogo.
+function arrastarDivisaDaLinha(evInicio) {
+  evInicio.preventDefault();
+  if (!fliperama) return;
+  const hCima = fliperama.col.terminaisEl.getBoundingClientRect().height;
+  const baixo = fliperama.el;
+  const hBaixo = baixo.getBoundingClientRect().height;
+  const y0 = evInicio.clientY;
+  document.body.classList.add('arrastando-divisa-linha');
+  function mover(ev) {
+    const delta = Math.max(120 - hCima, Math.min(ev.clientY - y0, hBaixo - 120));
+    baixo.style.flexBasis = (hBaixo - delta) + 'px';
+  }
+  function soltar() {
+    document.body.classList.remove('arrastando-divisa-linha');
+    window.removeEventListener('mousemove', mover);
+    window.removeEventListener('mouseup', soltar);
+  }
+  window.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', soltar);
 }
 
 // A tela cresce até o limite do espaço mantendo o formato do console (4:3,
-// 10:9…), e o preto fica só dentro dela. É feito aqui, e não no CSS, porque
-// o emulador escreve tamanho fixo no próprio canvas e o espaço muda de forma.
-function ajustarTela(tela) {
-  const centro = tela.parentElement;
-  if (!centro) return;
-  const estilo = getComputedStyle(centro);
-  const largura = centro.clientWidth - parseFloat(estilo.paddingLeft) - parseFloat(estilo.paddingRight);
-  const altura = centro.clientHeight - parseFloat(estilo.paddingTop) - parseFloat(estilo.paddingBottom);
+// 10:9…). Em pé ela segue a largura da coluna, deitada segue a altura da
+// metade, e nos dois casos o outro lado para em 60%, pra prateleira e os
+// atalhos não serem engolidos. É feito aqui, e não no CSS, porque o emulador
+// escreve tamanho fixo no próprio canvas e o espaço muda de forma.
+function ajustarTela() {
+  if (!fliperama) return;
+  const { el, tela } = fliperama;
+  const caixa = tela.parentElement;
+  const estilo = getComputedStyle(caixa);
   const [w, h] = (tela.style.aspectRatio || '4 / 3').split('/').map(Number);
-  const escala = Math.min(largura / w, altura / h);
-  tela.style.setProperty('width', Math.floor(w * escala) + 'px', 'important');
-  tela.style.setProperty('height', Math.floor(h * escala) + 'px', 'important');
+  let escala;
+  if (el.classList.contains('metade')) {
+    const altura = caixa.clientHeight - parseFloat(estilo.paddingTop) - parseFloat(estilo.paddingBottom);
+    escala = Math.min(altura / h, (el.clientWidth * 0.6) / w);
+  } else {
+    const largura = caixa.clientWidth - parseFloat(estilo.paddingLeft) - parseFloat(estilo.paddingRight);
+    escala = Math.min(largura / w, (el.clientHeight * 0.6) / h);
+  }
+  tela.style.setProperty('width', Math.max(0, Math.floor(w * escala)) + 'px', 'important');
+  tela.style.setProperty('height', Math.max(0, Math.floor(h * escala)) + 'px', 'important');
 }
 
 // A prateleira é a pasta ~/Jogos lida direto: o que estiver lá aparece aqui.
-async function encherPrateleira(prateleira, tela, aberto) {
-  prateleira.append(rotuloDaMesa('prateleira'));
+async function encherPrateleira(aberto) {
+  const { prateleira } = fliperama;
+  prateleira.append(rotuloDaMesa('prateleira', '~/Jogos'));
   const lista = pedacoDaMesa('mesa-itens'); // a parte que rola; o rótulo fica fora dela
   prateleira.append(lista);
   const pasta = (await window.api.home()) + '/Jogos';
   const itens = await window.api.listDir(pasta).catch(() => null);
 
   if (!itens) return lista.append(pedacoDaMesa('mesa-vazio', 'crie a pasta ~/Jogos e ponha os jogos nela'));
-
   const jogos = itens.filter((i) => !i.isDir && tipoDeMidia(i.name) === 'jogo');
   if (jogos.length === 0) return lista.append(pedacoDaMesa('mesa-vazio', 'nenhum jogo em ~/Jogos ainda'));
 
   for (const { name } of jogos) {
     const caminho = pasta + '/' + name;
-    const item = botaoDaMesa(name.slice(0, name.lastIndexOf('.')), () => {
-      for (const b of prateleira.querySelectorAll('.mesa-botao')) b.classList.remove('tocando');
-      item.classList.add('tocando');
-      $('nome-arquivo').textContent = caminho;
-      rodarJogo(caminho, tela);
-    });
+    const item = botaoDaMesa(name.slice(0, name.lastIndexOf('.')), () => rodarJogo(caminho));
     item.classList.add('mesa-jogo');
+    item.caminho = caminho;
     if (caminho === aberto) item.classList.add('tocando');
     lista.append(item);
   }
@@ -1514,32 +1613,30 @@ async function encherPrateleira(prateleira, tela, aberto) {
 
 const nomeDoJogo = (caminho) => caminho ? caminho.slice(caminho.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '') : '';
 
-// Troca o que está rodando na tela que já está montada.
-async function rodarJogo(caminho, tela) {
-  const rotulo = tela.parentElement && tela.parentElement.querySelector('.rot .seg:not(.on)');
-  if (rotulo) rotulo.textContent = nomeDoJogo(caminho);
+// Troca a fita do aparelho que já está na tela.
+async function rodarJogo(caminho) {
+  const { tela, rotulo, prateleira } = fliperama;
+  for (const b of prateleira.querySelectorAll('.mesa-jogo')) b.classList.toggle('tocando', b.caminho === caminho);
   if (jogo) {
     await guardarPonto(); // trocar de jogo também não perde o de antes
-    jogo.exit({ removeCanvas: false });
-    jogo = null;
-    jogoAtual = null;
+    desligarEmulador({ removeCanvas: false });
   }
 
   const [, core] = CORE_DO_JOGO.find(([extensoes]) => extensoes.test(caminho));
   tela.style.aspectRatio = FORMATO_DA_TELA[core] || '4 / 3';
-  ajustarTela(tela);
+  ajustarTela();
 
   // Na primeira vez de cada console o emulador vem da internet e demora um
   // pouco; o nome em cima avisa, pra tela preta não parecer travada.
-  const nome = $('nome-arquivo').textContent;
-  $('nome-arquivo').textContent = 'preparando o emulador…';
+  rotulo.textContent = 'preparando o emulador…';
   jogoPedido = caminho;
+  desenharAbas(); // a aba já leva o nome do jogo
   const [emulador, fita] = await Promise.all([
     window.api.coreDoJogo(core).catch(() => ({ erro: 'baixar' })),
     window.api.lerBytes(caminho).catch(() => ({ erro: 'leitura' })),
   ]);
   if (jogoPedido !== caminho) return; // clicou noutro jogo enquanto isso
-  $('nome-arquivo').textContent = caminho;
+  rotulo.textContent = nomeDoJogo(caminho);
 
   if (emulador.erro || fita.erro) {
     return avisar(emulador.erro === 'baixar'
@@ -1567,7 +1664,8 @@ async function rodarJogo(caminho, tela) {
   if (jogoPedido !== caminho) return; // trocou de jogo enquanto este subia
 
   jogoAtual = caminho;
-  await voltarAoPonto(tela); // tem ponto guardado? cai onde parou da última vez
+  desenharAbas(); // a aba troca "preparando" pelo nome valendo
+  await voltarAoPonto(); // tem ponto guardado? cai onde parou da última vez
   tela.focus(); // já entra valendo: o teclado vai pro jogo sem precisar clicar
 }
 
@@ -1593,13 +1691,12 @@ function ajustarDivisor() {
 // segundo estado pra manter.
 function atualizarTrilho() {
   const visor = $('visor');
-  const temJogo = !visor.hidden && !!visor.querySelector('.mesa');
-  const temMidia = (!visor.hidden && !temJogo && visor.childElementCount > 0) || !$('visor-doc').hidden;
+  const temMidia = !visor.hidden && visor.childElementCount > 0;
   $('btn-lateral').classList.toggle('ligada', !$('lateral').classList.contains('fechada'));
   $('btn-editor').classList.toggle('ligada', !$('editor').classList.contains('escondido') && !$('editor-area').hidden);
   $('btn-visor').classList.toggle('ligada', temMidia);
-  $('btn-jogo').classList.toggle('ligada', temJogo);
-  $('tipo-peca').textContent = temJogo ? 'jogo' : temMidia && $('editor').classList.contains('escondido') ? 'visor' : 'editor';
+  $('btn-jogo').classList.toggle('ligada', !!fliperama);
+  $('tipo-peca').textContent = temMidia && $('editor').classList.contains('escondido') ? 'visor' : 'editor';
 }
 
 let ultimoTexto = null; // o último arquivo de texto aberto, pro botão do editor reabrir
@@ -1618,11 +1715,9 @@ $('btn-visor').addEventListener('click', () => {
 });
 
 // Fliperama: desligado, liga o videogame; ligado, sai guardando o ponto.
-$('btn-jogo').addEventListener('click', async () => {
-  if (!$('btn-jogo').classList.contains('ligada')) return abrirMesaDeJogo(null);
-  await guardarPonto();
-  if ($('editor-area').classList.contains('dividido')) fecharArquivo(); // primeiro sai o texto do lado
-  fecharArquivo();
+$('btn-jogo').addEventListener('click', () => {
+  if (fliperama) fecharFliperama();
+  else abrirFliperama(null);
 });
 
 $('btn-fechar-arquivo').addEventListener('click', () => fecharArquivo());
@@ -1630,8 +1725,7 @@ $('btn-fechar-arquivo').addEventListener('click', () => fecharArquivo());
 // A bigorna: recolhe tudo e deixa só o terminal.
 $('btn-casa').addEventListener('click', async () => {
   $('lateral').classList.add('fechada');
-  if (jogo) await guardarPonto();
-  if ($('editor-area').classList.contains('dividido')) fecharArquivo();
+  if (fliperama) await fecharFliperama();
   if (!$('editor-area').hidden) fecharArquivo();
   if ($('terminal-area').hidden) alternarTerminal();
   const t = terminalDaVez();
@@ -1644,7 +1738,7 @@ async function abrirArquivo(caminho) {
 
   // Imagem, som, vídeo, PDF e jogo não vão pro editor de texto: abrem no visor.
   const tipo = tipoDeMidia(caminho);
-  if (tipo === 'jogo') return abrirMesaDeJogo(caminho);
+  if (tipo === 'jogo') return abrirFliperama(caminho); // vai pra área dos terminais
   if (tipo) return abrirMidia(caminho, tipo);
 
   const r = await window.api.readFile(caminho).catch(() => ({ erro: 'leitura' }));
@@ -1672,16 +1766,8 @@ async function abrirArquivo(caminho) {
     editor.onDidChangeModelContent(agendarSalvar);
   }
 
-  // Com um jogo rodando, o texto não expulsa ele: a tela vai pro lado direito
-  // e o texto fica à esquerda, pra escrever sem parar a partida.
-  if (jogo) {
-    limparVisorDoc(); // se uma mídia estava na metade esquerda, o texto toma o lugar dela
-    $('editor-area').classList.add('dividido');
-  } else {
-    limparVisor();
-    limparVisorDoc();
-    $('visor').hidden = true;
-  }
+  limparVisor();
+  $('visor').hidden = true;
   $('editor').classList.remove('escondido');
 
   const modeloVelho = editor.getModel();
@@ -1701,31 +1787,7 @@ async function abrirArquivo(caminho) {
 function fecharArquivo() {
   salvarAgora(); // fechar não perde a última mudança
 
-  // Texto e jogo juntos: fechar o texto devolve a tela inteira pro jogo, que
-  // continua rodando — não é fim de partida.
-  if ($('editor-area').classList.contains('dividido')) {
-    $('editor-area').classList.remove('dividido');
-    limparVisorDoc();
-    $('editor').classList.add('escondido');
-    if (editor) {
-      const modelo = editor.getModel();
-      editor.setModel(null);
-      if (modelo) modelo.dispose();
-    }
-    if (itemAtivo) {
-      itemAtivo.classList.remove('aberto-no-editor');
-      itemAtivo = null;
-    }
-    arquivoAberto = jogoAtual;
-    $('nome-arquivo').textContent = jogoAtual || 'jogos';
-    $('estado-arquivo').textContent = '';
-    atualizarTrilho();
-    document.querySelector('canvas.jogo')?.focus();
-    return;
-  }
-
   limparVisor();
-  limparVisorDoc();
   $('visor').hidden = true;
   if (editor) {
     const modelo = editor.getModel();
@@ -1792,26 +1854,6 @@ window.addEventListener('keydown', (ev) => {
 // ============================================================
 // DIVISOR da lateral (largura das pastas)
 // ============================================================
-
-// Arrastar a divisa entre o arquivo e a tela do jogo (só no modo dividido).
-$('divisor-meio').addEventListener('mousedown', (evInicio) => {
-  evInicio.preventDefault();
-  const area = $('editor-area');
-  const r = area.getBoundingClientRect();
-  document.body.classList.add('arrastando-divisa');
-
-  function mover(ev) {
-    const pct = Math.min(80, Math.max(20, ((ev.clientX - r.left) / r.width) * 100));
-    area.style.setProperty('--divisa', pct + '%');
-  }
-  function soltar() {
-    document.body.classList.remove('arrastando-divisa');
-    window.removeEventListener('mousemove', mover);
-    window.removeEventListener('mouseup', soltar);
-  }
-  window.addEventListener('mousemove', mover);
-  window.addEventListener('mouseup', soltar);
-});
 
 $('divisor-lateral').addEventListener('mousedown', (evInicio) => {
   evInicio.preventDefault();

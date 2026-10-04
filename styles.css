@@ -241,23 +241,12 @@ button { font: inherit; }
   justify-content: center;
   background: var(--fundo);
 }
-/* o visor da esquerda: a mídia ao lado do jogo, no modo dividido */
-#visor-doc {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--fundo);
-}
-#editor-area.dividido #visor-doc { right: calc(100% - var(--divisa)); border-right: 1px solid var(--borda); }
-
-#visor img, #visor video, #visor-doc img, #visor-doc video {
+#visor img, #visor video {
   max-width: calc(100% - 28px);
   max-height: calc(100% - 28px);
   object-fit: contain;
 }
-#visor iframe, #visor-doc iframe { width: 100%; height: 100%; border: none; }
+#visor iframe { width: 100%; height: 100%; border: none; }
 .toca-audio {
   width: min(480px, 85%);
   display: flex;
@@ -274,19 +263,38 @@ button { font: inherit; }
 }
 .toca-audio audio { width: 100%; }
 
-/* mesa de jogo: três molduras lado a lado — comandos | tela do console |
-   prateleira de jogos — cada uma com o nome escrito na linha */
-.mesa {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
-  padding: 12px 6px 6px;
+/* fliperama: o console mora na área dos terminais, numa coluna com aba
+   própria. Em pé (coluna só dele): prateleira | tela | atalhos, de cima pra
+   baixo. Deitado (metade de baixo, com terminal em cima): tela à esquerda,
+   prateleira e atalhos empilhados à direita. */
+.fliperama {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 10px 6px 7px;
+  display: grid;
+  gap: 16px 6px;
+  grid-template-areas: 'prat' 'jogo' 'atalhos';
+  grid-template-rows: minmax(0, 1fr) auto auto;
 }
-.mesa-centro {
-  flex: 1;
-  min-width: 0;
+/* na coluna inteira dele não há terminal pra mostrar */
+.coluna.fl-inteira .terminais { display: none; }
+.fliperama.metade {
+  flex: 0 0 42%; /* o tamanho de partida; a divisa arrasta */
+  grid-template-areas: 'jogo prat' 'jogo atalhos';
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.fl-prateleira { grid-area: prat; }
+.fl-jogo { grid-area: jogo; }
+.fl-atalhos { grid-area: atalhos; }
+.fl-prateleira, .fl-atalhos {
+  position: relative;
+  border: 1px solid var(--borda-2);
+  padding: 14px 6px 8px;
+  display: flex;
+  flex-direction: column;
+}
+.fl-jogo {
   position: relative;
   border: 1px solid var(--borda-2);
   padding: 14px;
@@ -294,7 +302,14 @@ button { font: inherit; }
   align-items: center;
   justify-content: center;
 }
-#visor .jogo {
+/* os atalhos numa linha só, quebrando quando falta largura */
+.fl-linha {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  justify-content: center;
+}
+.fliperama .jogo {
   /* o tamanho é o código que dá (ajustarTela), pra caber no espaço mantendo
      o formato do console */
   border: 1px solid #1b1b1b;
@@ -302,16 +317,16 @@ button { font: inherit; }
   image-rendering: pixelated; /* pixel quadrado, do jeito que o aparelho desenhava */
   outline: none;
 }
-
-.mesa-lado {
-  width: 150px;
+/* a divisa entre o terminal e o fliperama, na coluna dividida ao meio */
+.divisa-linha {
+  height: 6px;
   flex: none;
-  position: relative;
-  border: 1px solid var(--borda-2);
-  padding: 14px 6px 8px;
-  display: flex;
-  flex-direction: column;
+  cursor: row-resize;
 }
+.divisa-linha:hover { background: #1a1a1a; }
+body.arrastando-divisa-linha { cursor: row-resize; user-select: none; }
+body.arrastando-divisa-linha iframe { pointer-events: none; }
+
 .mesa-itens {
   flex: 1;
   min-height: 0;
@@ -339,9 +354,9 @@ button { font: inherit; }
 }
 .mesa-botao::before { content: '›'; color: transparent; flex: none; }
 .mesa-botao .tecla { color: var(--brasa); flex: none; }
-/* na lista de comandos a marca › não entra: o atalho já aponta */
+/* na linha de atalhos a marca › não entra: o atalho já aponta */
 .mesa-botao .tecla ~ span { min-width: 0; }
-.mesa-lado:first-child .mesa-botao::before { display: none; }
+.fl-linha .mesa-botao::before { display: none; }
 .mesa-botao:hover { color: var(--texto); }
 .mesa-botao:hover::before { color: var(--texto-fraco); }
 .mesa-botao.tocando { color: var(--texto); }
@@ -353,29 +368,9 @@ button { font: inherit; }
   line-height: 1.6;
 }
 
-/* texto e jogo ao mesmo tempo: o texto fica à esquerda e a tela vai pro lado
-   direito, pra escrever sem parar o jogo */
-#editor-area { --divisa: 50%; } /* onde fica a divisa; o arrasto muda */
-#editor-area.dividido #editor { right: calc(100% - var(--divisa)); }
-#editor-area.dividido #visor { left: var(--divisa); border-left: 1px solid var(--borda); }
-
-/* a barra entre o arquivo e o jogo: só existe no modo dividido */
-#divisor-meio { display: none; }
-#editor-area.dividido #divisor-meio {
-  display: block;
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc(var(--divisa) - 3px);
-  width: 6px;
-  cursor: col-resize;
-  z-index: 2;
-}
-#editor-area.dividido #divisor-meio:hover { background: #2e2e2e; }
-/* durante o arrasto o PDF não pode engolir o mouse, senão a divisa trava */
+/* durante o arrasto de uma divisa o PDF não pode engolir o mouse, senão ela trava */
 body.arrastando-divisa iframe { pointer-events: none; }
 body.arrastando-divisa { cursor: col-resize; user-select: none; }
-#editor-area.dividido .mesa-lado { display: none; }
 
 /* ---------- a base: o terminal ---------- */
 #terminal-area {
