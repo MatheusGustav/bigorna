@@ -399,11 +399,22 @@ ipcMain.on('fs:arrastar', (ev, caminho) => {
   }
 });
 
+// Pastas primeiro, por nome; arquivos por ordem de chegada, o mais novo no
+// fim — baixou agora, está no pé da pasta (decisão do Matheus). A chegada é
+// a criação do arquivo (birthtime), não a última mexida: editar não muda
+// ninguém de lugar, só arquivo novo entra no fim.
 ipcMain.handle('fs:list', async (_ev, dir) => {
   const itens = await fs.readdir(dir, { withFileTypes: true });
-  return itens
-    .map((d) => ({ name: d.name, isDir: d.isDirectory() }))
-    .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name, 'pt-BR') : a.isDir ? -1 : 1));
+  const lista = await Promise.all(itens.map(async (d) => ({
+    name: d.name,
+    isDir: d.isDirectory(),
+    chegada: d.isDirectory() ? 0 : await fs.stat(path.join(dir, d.name))
+      .then((i) => i.birthtimeMs || i.mtimeMs, () => 0), // sistema de arquivos sem birthtime cai pro mtime
+  })));
+  return lista.sort((a, b) =>
+    a.isDir !== b.isDir ? (a.isDir ? -1 : 1)
+      : a.isDir ? a.name.localeCompare(b.name, 'pt-BR')
+      : a.chegada - b.chegada || a.name.localeCompare(b.name, 'pt-BR'));
 });
 
 // ---------- Ícones da lateral (Material Icon Theme) ----------
@@ -447,14 +458,10 @@ ipcMain.handle('icones:tema', async () => {
 const vigias = new Map(); // pasta → { vigia, espera }
 
 ipcMain.handle('fs:watch', (_ev, dir) => {
-  // Pedir de novo recria o vigia em vez de confiar no antigo: um que morreu
-  // calado (acontece com o inotify) volta à vida junto com a releitura.
-  const velho = vigias.get(dir);
-  if (velho) {
-    clearTimeout(velho.espera);
-    velho.vigia.close();
-    vigias.delete(dir);
-  }
+  // Vigia vivo fica: recriar a cada releitura abria um vão sem ninguém
+  // olhando, e evento que caísse nele se perdia. Vigia que deu erro já saiu
+  // do mapa, então o pedido seguinte cria um novo no lugar.
+  if (vigias.has(dir)) return true;
   try {
     const v = vigiar(dir, () => {
       const dados = vigias.get(dir);
