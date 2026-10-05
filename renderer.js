@@ -736,7 +736,9 @@ async function alternarPasta(linha, abrir) {
   linha.firstElementChild.outerHTML = icone(linha.dados.nome, true, abrir);
   if (abrir) pastasAbertas.add(caminho);
   else pastasAbertas.delete(caminho);
-  if (abrir && !pastasLidas.has(caminho)) {
+  if (abrir) {
+    // Relê do disco toda vez que abre, não só na primeira: se o vigia da
+    // pasta tiver morrido calado, abrir ela conserta a lista e rearma ele.
     pastasLidas.set(caminho, { recipiente: filhos, nivel: nivel + 1 });
     await montarPasta(caminho, filhos, nivel + 1);
   }
@@ -2049,18 +2051,22 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
 // ============================================================
 
 (async () => {
+  pastaPedida = await window.api.pastaPedida();
+  const arquivo = await window.api.arquivoPedido();
+  // A Bigorna abre só com o terminal; a lateral fica pro botão do trilho
+  // (decisão do Matheus). Chamada pra abrir pasta ou arquivo é a exceção:
+  // a lateral já vem à mostra, porque vai descer até o pedido.
+  if (!pastaPedida && !arquivo) $('lateral').classList.add('fechada');
   temaDeIcones = await window.api.temaDeIcones().catch(() => null);
   casa = await window.api.home();
   $('raiz-nome').textContent = casa;
   pastasLidas.set(casa, { recipiente: $('arvore'), nivel: 0 });
   await montarPasta(casa, $('arvore'), 0);
-  pastaPedida = await window.api.pastaPedida();
   if (dentroDe(pastaPedida, casa)) {
     await revelarPasta(pastaPedida, casa, $('arvore'));
     pastaPedida = null;
   }
   await criarTerminal();
   atualizarTrilho();
-  const arquivo = await window.api.arquivoPedido();
   if (arquivo) await abrirPedido(arquivo);
 })();

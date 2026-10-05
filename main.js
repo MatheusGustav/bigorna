@@ -447,7 +447,14 @@ ipcMain.handle('icones:tema', async () => {
 const vigias = new Map(); // pasta → { vigia, espera }
 
 ipcMain.handle('fs:watch', (_ev, dir) => {
-  if (vigias.has(dir)) return true;
+  // Pedir de novo recria o vigia em vez de confiar no antigo: um que morreu
+  // calado (acontece com o inotify) volta à vida junto com a releitura.
+  const velho = vigias.get(dir);
+  if (velho) {
+    clearTimeout(velho.espera);
+    velho.vigia.close();
+    vigias.delete(dir);
+  }
   try {
     const v = vigiar(dir, () => {
       const dados = vigias.get(dir);
