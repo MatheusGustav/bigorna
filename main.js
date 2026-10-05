@@ -2,7 +2,7 @@ const { app, BrowserWindow, Menu, ipcMain, dialog, net, shell: sistema } = requi
 const os = require('os');
 const path = require('path');
 const fs = require('fs/promises');
-const { watch: vigiar, statSync, rmSync, readdirSync, constants: fsc } = require('fs');
+const { watch: vigiar, statSync, rmSync, mkdirSync, chmodSync, appendFileSync, constants: fsc } = require('fs');
 const { fileURLToPath } = require('url');
 const { execFile, spawn } = require('child_process');
 const net_ = require('net');
@@ -10,6 +10,16 @@ const pty = require('node-pty');
 
 let win = null;
 const shells = new Map(); // id do terminal (dado pela janela) → pty
+
+// Quebrou por dentro, fica anotado: sem isso, "abri e não veio janela" não
+// deixa rastro nenhum. O arquivo fica na pasta de configuração.
+function anotarErro(origem, erro) {
+  const linha = `${new Date().toISOString()} [${origem}] ${erro?.stack || erro}\n`;
+  try { appendFileSync(path.join(app.getPath('userData'), 'erros.log'), linha); } catch { /* sem onde anotar */ }
+  console.error(linha.trim());
+}
+process.on('uncaughtException', (erro) => anotarErro('inesperado', erro));
+process.on('unhandledRejection', (erro) => anotarErro('promessa', erro));
 
 // Pedido de quem abriu a Bigorna como terminal do sistema, do jeito que o KDE
 // e os outros programas pedem pro Konsole: `--workdir <pasta>` abre o primeiro
@@ -27,7 +37,8 @@ function lerPedido() {
       let alvo = args[i];
       try { if (alvo.startsWith('file://')) alvo = fileURLToPath(alvo); } catch { continue; }
       alvo = path.resolve(alvo);
-      const info = statSync(alvo, { throwIfNoEntry: false });
+      let info = null;
+      try { info = statSync(alvo, { throwIfNoEntry: false }); } catch { continue; } // sem permissão de olhar: ignora
       if (!info) continue;
       pedido.pasta = pedido.revelar = info.isDirectory() ? alvo : path.dirname(alvo);
       pedido.arquivo = info.isDirectory() ? null : alvo;
@@ -46,57 +57,109 @@ const pastaPedida = pedido.revelar;
 const arquivoPedido = pedido.arquivo;
 
 // ---------- arquivo pedido vai pra janela que já está aberta ----------
-// Cada Bigorna aberta escuta numa tomada própria em /run/user/<id>/bigorna e,
-// ao ganhar o foco, anota que foi a última usada. Quem nasce só pra abrir um
-// arquivo entrega o caminho pra essa última e sai sem abrir janela; sem
-// ninguém pra receber, segue e abre a própria janela.
+// Uma tomada única em /run/user/<id>/bigorna: a janela em foco toma ela pra
+// si ao ganhar o foco. Quem nasce só pra abrir um arquivo entrega o caminho
+// ali e sai sem abrir janela — mas só se quem recebeu confirmar; sem
+// confirmação, segue e abre a própria janela.
 const pastaDasTomadas = path.join(process.env.XDG_RUNTIME_DIR || os.tmpdir(), 'bigorna');
-const minhaTomada = path.join(pastaDasTomadas, process.pid + '.sock');
-const marcaDaUltima = path.join(pastaDasTomadas, 'ultima');
+const tomadaDaVez = path.join(pastaDasTomadas, 'atual.sock');
+const CONFIRMACAO = Buffer.from([6]); // ACK: "recebi e vou abrir"
 
-async function entregarPraUltima(arquivo) {
-  const pid = (await fs.readFile(marcaDaUltima, 'utf8').catch(() => '')).trim();
-  if (!pid) return false;
+// A pasta precisa ser só do usuário (modo 700): caindo em /tmp (sem
+// XDG_RUNTIME_DIR), outro usuário poderia criar ela antes e interceptar os
+// caminhos entregues. Pasta estranha = a entrega fica desligada, e só ela.
+let pastaConferida = null;
+function pastaSegura() {
+  if (pastaConferida !== null) return pastaConferida;
+  try {
+    mkdirSync(pastaDasTomadas, { recursive: true, mode: 0o700 });
+    let info = statSync(pastaDasTomadas);
+    if (info.uid === process.getuid() && (info.mode & 0o077) !== 0) {
+      chmodSync(pastaDasTomadas, 0o700);
+      info = statSync(pastaDasTomadas);
+    }
+    pastaConferida = info.isDirectory() && info.uid === process.getuid() && (info.mode & 0o077) === 0;
+  } catch {
+    pastaConferida = false;
+  }
+  if (!pastaConferida) console.error('[tomada] pasta insegura ou inacessível, entrega desligada:', pastaDasTomadas);
+  return pastaConferida;
+}
+
+async function entregarPraJanelaAberta(arquivo) {
+  if (!pastaSegura()) return false;
+  // A janela em foco pode estar trocando a tomada de mão neste instante: uma
+  // segunda tentativa cobre esse vão.
+  if (await tentarEntrega(arquivo)) return true;
+  await new Promise((r) => setTimeout(r, 150));
+  return tentarEntrega(arquivo);
+}
+
+function tentarEntrega(arquivo) {
   return new Promise((resolve) => {
-    const ligacao = net_.connect(path.join(pastaDasTomadas, pid + '.sock'));
-    ligacao.setTimeout(1500, () => { ligacao.destroy(); resolve(false); });
-    ligacao.on('error', () => resolve(false));
-    ligacao.on('connect', () => ligacao.end(arquivo + '\n'));
-    ligacao.on('close', (erro) => resolve(!erro)); // fechou sem erro = a outra recebeu
+    const ligacao = net_.connect(tomadaDaVez);
+    let confirmou = false;
+    ligacao.setTimeout(1500, () => ligacao.destroy());
+    ligacao.on('error', () => {});
+    ligacao.on('connect', () => ligacao.end(arquivo)); // o caminho cru, sem mexer nele
+    ligacao.on('data', () => { confirmou = true; }); // qualquer resposta é o "recebi"
+    ligacao.on('close', () => resolve(confirmou));
   });
 }
 
-function escutarPedidos() {
-  const tomada = net_.createServer((ligacao) => {
-    let texto = '';
-    ligacao.on('data', (d) => { texto += d; });
+// A janela ganhou o foco: toma a tomada pra si (sai da mão de quem tinha).
+let tomada = null; // o servidor escutando, se for desta janela
+let inoDaTomada = null; // pra saber se o arquivo da tomada ainda é o nosso
+function tomarATomada() {
+  if (!pastaSegura()) return;
+  try {
+    // já é nossa e ninguém tomou nesse meio tempo: nada a fazer
+    if (tomada && statSync(tomadaDaVez, { throwIfNoEntry: false })?.ino === inoDaTomada) return;
+    if (tomada) tomada.close();
+    tomada = null;
+    rmSync(tomadaDaVez, { force: true });
+  } catch (erro) {
+    return console.error('[tomada] não consegui tomar:', erro.message);
+  }
+  const servidor = net_.createServer((ligacao) => {
+    const pedacos = [];
+    ligacao.on('error', () => {});
+    ligacao.on('data', (d) => pedacos.push(d));
     ligacao.on('end', () => {
-      const arquivo = texto.trim();
-      if (win && path.isAbsolute(arquivo)) {
-        win.webContents.send('abrir-arquivo', arquivo);
-        if (win.isMinimized()) win.restore();
-        win.focus();
-      }
-      ligacao.end();
+      const arquivo = Buffer.concat(pedacos).toString('utf8');
+      if (path.isAbsolute(arquivo) && abrirNaJanela(arquivo)) ligacao.end(CONFIRMACAO);
+      else ligacao.end(); // sem confirmação: quem mandou abre a própria janela
     });
   });
-  tomada.on('error', () => {}); // sem tomada a janela funciona igual, só não recebe arquivo
-  // Tomada de Bigorna que caiu (fechada à força) fica pra trás: some aqui.
-  const vivo = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-  for (const nome of readdirSync(pastaDasTomadas)) {
-    if (!nome.endsWith('.sock')) continue;
-    const pid = Number(nome.slice(0, -5));
-    if (pid === process.pid || !vivo(pid)) rmSync(path.join(pastaDasTomadas, nome), { force: true });
-  }
-  tomada.listen(minhaTomada);
-  app.on('will-quit', () => {
-    tomada.close();
-    rmSync(minhaTomada, { force: true });
+  servidor.on('error', (erro) => {
+    console.error('[tomada] parou de escutar:', erro.message);
+    if (tomada === servidor) tomada = null;
   });
+  servidor.listen(tomadaDaVez, () => {
+    inoDaTomada = statSync(tomadaDaVez, { throwIfNoEntry: false })?.ino ?? null;
+  });
+  tomada = servidor;
 }
 
-function marcarComoUltima() {
-  fs.writeFile(marcaDaUltima, String(process.pid)).catch(() => {});
+app.on('will-quit', () => {
+  if (!tomada) return;
+  tomada.close();
+  // só apaga se o arquivo ainda é o nosso: outra janela pode ter tomado
+  try {
+    if (statSync(tomadaDaVez, { throwIfNoEntry: false })?.ino === inoDaTomada) rmSync(tomadaDaVez, { force: true });
+  } catch { /* já foi */ }
+});
+
+// Entrega o pedido na janela: direto, ou guardado pra quando ela terminar de
+// carregar — mandado antes disso, o aviso se perderia no vazio.
+const esperandoAJanela = [];
+function abrirNaJanela(arquivo) {
+  if (!win) return false;
+  if (win.webContents.isLoading()) esperandoAJanela.push(arquivo);
+  else win.webContents.send('abrir-arquivo', arquivo);
+  if (win.isMinimized()) win.restore();
+  win.focus();
+  return true;
 }
 
 function criarJanela() {
@@ -118,8 +181,29 @@ function criarJanela() {
 
   win.loadFile('index.html');
 
-  win.on('focus', marcarComoUltima);
-  marcarComoUltima();
+  win.on('focus', tomarATomada);
+  tomarATomada();
+
+  win.webContents.on('did-finish-load', () => {
+    while (esperandoAJanela.length) win.webContents.send('abrir-arquivo', esperandoAJanela.shift());
+  });
+
+  // Fechar espera a última gravação do editor chegar no disco: a janela avisa
+  // quando salvou (ou vale 1s, se o renderer estiver travado) e aí fecha.
+  let podeFechar = false;
+  win.on('close', (ev) => {
+    if (podeFechar) return;
+    ev.preventDefault();
+    const seguir = () => {
+      if (podeFechar) return;
+      podeFechar = true;
+      ipcMain.removeListener('janela:pode-fechar', seguir);
+      if (win) win.close();
+    };
+    ipcMain.once('janela:pode-fechar', seguir);
+    win.webContents.send('janela:vai-fechar');
+    setTimeout(seguir, 1000);
+  });
 
   win.on('closed', () => {
     win = null;
@@ -160,6 +244,7 @@ ipcMain.handle('pty:spawn', async (_ev, id, cols, rows, pasta) => {
   p.onExit(({ exitCode, signal }) => {
     console.log('[pty] terminal', id, 'encerrou: código', exitCode, 'sinal', signal);
     shells.delete(id);
+    infoDeGit.delete(id);
     if (inicio?.comando) { if (win) win.close(); return; }
     if (win) win.webContents.send('pty:exit', id, exitCode);
   });
@@ -185,21 +270,37 @@ ipcMain.on('pty:kill', (_ev, id) => {
 // agora e, se a pasta for de um repositório git, qual repositório e qual
 // branch. Worktrees respondem o mesmo repositório — é por isso que dois
 // Claude Codes da mesma base caem no mesmo grupo sozinhos.
+// O repositório fica guardado por terminal enquanto a pasta não muda, e a
+// branch sai do arquivo HEAD direto: subir um git por aba a cada 3 segundos
+// custava caro; ler um arquivo não custa nada.
+const infoDeGit = new Map(); // id → { cwd, repo, nome, gitdir } (só quando é repositório)
+
+async function infoDoRepositorio(id, cwd) {
+  const guardado = infoDeGit.get(id);
+  if (!guardado || guardado.cwd !== cwd) {
+    infoDeGit.delete(id);
+    let saida;
+    try {
+      saida = await rodar('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir']);
+    } catch { return null; } // fora de repositório (não guarda: um git init aparece sozinho)
+    const [comum, gitdir] = saida.trim().split('\n');
+    const repo = path.dirname(comum);
+    infoDeGit.set(id, { cwd, repo, nome: path.basename(repo), gitdir });
+  }
+  const dados = infoDeGit.get(id);
+  const head = await fs.readFile(path.join(dados.gitdir, 'HEAD'), 'utf8').catch(() => '');
+  if (!head) { infoDeGit.delete(id); return null; } // o .git sumiu: na próxima, pergunta de novo
+  const ref = head.match(/^ref: refs\/heads\/(.+)$/m);
+  return { repo: dados.repo, nome: dados.nome, branch: ref ? ref[1] : 'HEAD' };
+}
+
 ipcMain.handle('pty:info', async (_ev, id) => {
   const p = shells.get(id);
   if (!p) return null;
   const cwd = await fs.readlink(`/proc/${p.pid}/cwd`).catch(() => null);
   // p.process às vezes vem com o caminho inteiro (/bin/bash): fica só o nome
   const info = { cwd, programa: path.basename(p.process || ''), repo: null, nome: null, branch: null };
-  if (cwd) {
-    try {
-      const saida = await rodar('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--abbrev-ref', 'HEAD']);
-      const [comum, branch] = saida.trim().split('\n');
-      info.repo = path.dirname(comum);
-      info.nome = path.basename(info.repo);
-      info.branch = branch;
-    } catch { /* fora de repositório: fica só a pasta */ }
-  }
+  if (cwd) Object.assign(info, await infoDoRepositorio(id, cwd) || {});
   return info;
 });
 
@@ -352,17 +453,34 @@ ipcMain.handle('fs:watch', (_ev, dir) => {
   return true;
 });
 
+// A pasta saiu da lateral: o vigia dela vai junto, senão eles só acumulam.
+ipcMain.on('fs:unwatch', (_ev, dir) => {
+  const dados = vigias.get(dir);
+  if (!dados) return;
+  clearTimeout(dados.espera);
+  dados.vigia.close();
+  vigias.delete(dir);
+});
+
 ipcMain.handle('fs:read', async (_ev, arquivo) => {
   const info = await fs.stat(arquivo);
   if (info.size > 2 * 1024 * 1024) return { erro: 'grande' };
   const buf = await fs.readFile(arquivo);
   if (buf.includes(0)) return { erro: 'binario' }; // tem byte nulo: não é texto
-  return { conteudo: buf.toString('utf8') };
+  return { conteudo: buf.toString('utf8'), mtime: info.mtimeMs };
 });
 
-ipcMain.handle('fs:write', async (_ev, arquivo, conteudo) => {
-  await fs.writeFile(arquivo, conteudo, 'utf8');
-  return true;
+// Gravação em dois tempos (arquivo ao lado + troca): queda no meio do caminho
+// não deixa o arquivo pela metade. E se alguém (git, Claude no terminal) mexeu
+// nele depois do mtime que a janela conhece, não grava por cima calado:
+// responde que mudou e a janela decide.
+ipcMain.handle('fs:write', async (_ev, arquivo, conteudo, mtimeConhecido) => {
+  const antes = await fs.stat(arquivo).catch(() => null);
+  if (mtimeConhecido != null && antes && antes.mtimeMs > mtimeConhecido) return { erro: 'mudou-por-fora' };
+  const aoLado = path.join(path.dirname(arquivo), '.' + path.basename(arquivo) + '.bigorna~');
+  await fs.writeFile(aoLado, conteudo, { encoding: 'utf8', mode: antes ? antes.mode & 0o777 : 0o644 });
+  await fs.rename(aoLado, arquivo);
+  return { mtime: (await fs.stat(arquivo).catch(() => null))?.mtimeMs ?? null };
 });
 
 // ---------- Menu do botão direito na lateral (igual ao do Dolphin) ----------
@@ -647,10 +765,8 @@ ipcMain.handle('jogo:ler-ponto', async (_ev, jogo) => {
 });
 
 app.whenReady().then(async () => {
-  await fs.mkdir(pastaDasTomadas, { recursive: true }).catch(() => {});
-  if (arquivoPedido && !pedido.comando && await entregarPraUltima(arquivoPedido)) return app.exit(0);
-  escutarPedidos();
+  if (arquivoPedido && !pedido.comando && await entregarPraJanelaAberta(arquivoPedido)) return app.exit(0);
   criarJanela();
-});
+}).catch((erro) => anotarErro('partida', erro));
 
 app.on('window-all-closed', () => app.quit());

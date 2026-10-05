@@ -23,9 +23,14 @@ contextBridge.exposeInMainWorld('api', {
   temaDeIcones: () => ipcRenderer.invoke('icones:tema'),
   listDir: (dir) => ipcRenderer.invoke('fs:list', dir),
   readFile: (arquivo) => ipcRenderer.invoke('fs:read', arquivo),
-  writeFile: (arquivo, conteudo) => ipcRenderer.invoke('fs:write', arquivo, conteudo),
+  writeFile: (arquivo, conteudo, mtimeConhecido) => ipcRenderer.invoke('fs:write', arquivo, conteudo, mtimeConhecido),
   vigiarPasta: (dir) => ipcRenderer.invoke('fs:watch', dir),
+  desvigiarPasta: (dir) => ipcRenderer.send('fs:unwatch', dir),
   onPastaMudou: (cb) => ipcRenderer.on('fs:mudou', (_ev, dir) => cb(dir)),
+
+  // fechar a janela espera a última gravação do editor
+  onVaiFechar: (cb) => ipcRenderer.on('janela:vai-fechar', cb),
+  podeFechar: () => ipcRenderer.send('janela:pode-fechar'),
   renomear: (de, para) => ipcRenderer.invoke('fs:rename', de, para),
   criar: (caminho, ehPasta) => ipcRenderer.invoke('fs:create', caminho, ehPasta),
   lixeira: (caminho) => ipcRenderer.invoke('fs:trash', caminho),

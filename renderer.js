@@ -773,7 +773,11 @@ let raizFora = null;
 let cwdFora = null; // a última pasta de fora conferida, pra não perguntar de novo
 
 function limparFora() {
-  for (const c of [...pastasLidas.keys()]) if (!dentroDe(c, casa)) pastasLidas.delete(c);
+  for (const c of [...pastasLidas.keys()]) {
+    if (dentroDe(c, casa)) continue;
+    pastasLidas.delete(c);
+    if (c !== pastaVigiadaDoArquivo) window.api.desvigiarPasta(c); // o vigia sai junto da lateral
+  }
   $('arvore-fora').replaceChildren();
 }
 
@@ -806,13 +810,22 @@ async function atualizarFora() {
 async function abrirPedido(caminho) {
   if (dentroDe(caminho, casa)) await revelarPasta(pastaDe(caminho), casa, $('arvore'));
   await abrirArquivo(caminho);
+  if (caminho !== arquivoAberto) return; // não abriu (erro de leitura): o destaque que estava, fica
   const linha = [...document.querySelectorAll('#lateral .item')].find((el) => el.dados?.caminho === caminho);
-  if (linha && caminho === arquivoAberto) marcarAtivo(linha);
+  if (linha) marcarAtivo(linha);
+  else if (itemAtivo) {
+    // o arquivo aberto não tem linha à mostra: nenhuma pode ficar acesa
+    itemAtivo.classList.remove('aberto-no-editor');
+    itemAtivo = null;
+  }
 }
 window.api.onAbrirArquivo((caminho) => abrirPedido(caminho));
 
 // O vigia avisou que uma pasta mudou (pode ter sido por fora da Bigorna).
-window.api.onPastaMudou((dir) => recarregarPasta(dir));
+window.api.onPastaMudou((dir) => {
+  recarregarPasta(dir);
+  if (arquivoAberto && pastaDe(arquivoAberto) === dir) recarregarArquivoAberto();
+});
 
 // Relê uma pasta do disco depois de criar, renomear, apagar ou compactar.
 async function recarregarPasta(dir) {
@@ -820,7 +833,10 @@ async function recarregarPasta(dir) {
   if (!lida) return; // ainda não foi aberta: vai ser lida quando abrir
   // Relendo uma pasta da metade de baixo (como /home), o que é da casa fica: é da metade de cima.
   for (const c of pastasLidas.keys()) {
-    if (c.startsWith(dir + '/') && (dentroDe(dir, casa) || !dentroDe(c, casa))) pastasLidas.delete(c);
+    if (c.startsWith(dir + '/') && (dentroDe(dir, casa) || !dentroDe(c, casa))) {
+      pastasLidas.delete(c);
+      if (c !== pastaVigiadaDoArquivo) window.api.desvigiarPasta(c); // vai ser vigiada de novo se reaparecer
+    }
   }
   // Relendo, a lista encolhe e cresce de novo enquanto reabre as pastas; sem
   // guardar onde estava, ela pularia de lugar.
@@ -1218,6 +1234,7 @@ require.config({ paths: { vs: 'node_modules/monaco-editor/min/vs' } });
 
 let editor = null;
 let arquivoAberto = null;
+let mtimeAberto = null; // o mtime do que a janela leu ou gravou por último
 let salvarAgendado = null; // espera da gravação automática
 
 function monacoPronto() {
@@ -1266,6 +1283,14 @@ function avisar(texto) {
   clearTimeout(avisoAgendado);
   avisoAgendado = setTimeout(() => { el.hidden = true; }, 3000);
 }
+
+// Quebrou por dentro: aparece no aviso em vez de morrer calado no console
+// que ninguém abre. O "erro" de laço do ResizeObserver fica de fora: o
+// Chromium dispara ele à toa e não quebra nada.
+window.addEventListener('error', (ev) => {
+  if (!/ResizeObserver/.test(ev.message || '')) avisar('erro interno: ' + ev.message);
+});
+window.addEventListener('unhandledrejection', (ev) => avisar('erro interno: ' + (ev.reason?.message || ev.reason)));
 
 // ---------- Visor de mídia: imagem, áudio, vídeo e PDF ----------
 // Tudo dentro da própria janela: o Chromium que desenha a Bigorna já sabe
@@ -1839,8 +1864,8 @@ async function abrirArquivo(caminho) {
       minimap: { enabled: false },
     });
     // Ctrl+S grava na hora, pro costume não atrapalhar — mas nem precisa:
-    // toda mudança já salva sozinha.
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, salvar);
+    // toda mudança já salva sozinha. Forçado: grava mesmo se mudou por fora.
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => salvar(true));
     editor.onDidChangeModelContent(agendarSalvar);
   }
 
@@ -1854,11 +1879,24 @@ async function abrirArquivo(caminho) {
   if (modeloVelho) modeloVelho.dispose();
 
   arquivoAberto = caminho;
+  mtimeAberto = r.mtime ?? null;
   ultimoTexto = caminho;
+  vigiarPastaDoArquivo(caminho); // mudou por fora, a recarga fica sabendo
   $('nome-arquivo').textContent = caminho;
   $('estado-arquivo').textContent = '';
   mostrarPeca(true);
   editor.focus();
+}
+
+// A pasta do arquivo aberto fica vigiada enquanto ele estiver na tela; saindo
+// ele, o vigia só fica se a lateral também mostra a pasta.
+let pastaVigiadaDoArquivo = null;
+function vigiarPastaDoArquivo(caminho) {
+  const dir = caminho ? pastaDe(caminho) : null;
+  if (pastaVigiadaDoArquivo === dir) return;
+  if (pastaVigiadaDoArquivo && !pastasLidas.has(pastaVigiadaDoArquivo)) window.api.desvigiarPasta(pastaVigiadaDoArquivo);
+  pastaVigiadaDoArquivo = dir;
+  if (dir) window.api.vigiarPasta(dir);
 }
 
 // Fecha o que está na tela (texto ou mídia) e volta pra tela de nenhum arquivo.
@@ -1878,6 +1916,8 @@ function fecharArquivo() {
     itemAtivo = null;
   }
   arquivoAberto = null;
+  mtimeAberto = null;
+  vigiarPastaDoArquivo(null);
   $('nome-arquivo').textContent = 'bigorna';
   $('estado-arquivo').textContent = '';
   mostrarPeca(false);
@@ -1885,13 +1925,17 @@ function fecharArquivo() {
   if (t && !$('terminal-area').hidden) t.term.focus(); // sem arquivo, o teclado volta pro terminal
 }
 
-async function salvar() {
+async function salvar(forcado) {
   clearTimeout(salvarAgendado);
   salvarAgendado = null;
   // Sem modelo é mídia no visor: salvar aqui escreveria texto em cima dela.
   if (!editor || !editor.getModel() || !arquivoAberto) return;
   try {
-    await window.api.writeFile(arquivoAberto, editor.getValue());
+    const r = await window.api.writeFile(arquivoAberto, editor.getValue(), forcado ? null : mtimeAberto);
+    // Alguém (git, Claude no terminal) mexeu no arquivo depois que a janela
+    // leu: gravar agora apagaria a mudança dele. Ctrl+S é quem decide.
+    if (r.erro === 'mudou-por-fora') return avisar('o arquivo mudou por fora da Bigorna — Ctrl+S grava por cima');
+    mtimeAberto = r.mtime ?? mtimeAberto;
     const agora = new Date();
     const hora = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
     $('estado-arquivo').textContent = 'salvo · ' + hora;
@@ -1900,8 +1944,30 @@ async function salvar() {
   }
 }
 
-// Fechar a janela também não perde a última mudança.
+// O arquivo aberto mudou por fora (git, Claude no terminal ao lado): sem
+// mudança sua pendente, recarrega sozinho mantendo o cursor; com mudança a
+// caminho, fica quieto — o aviso do salvar é quem cuida do conflito.
+async function recarregarArquivoAberto() {
+  if (!editor || !arquivoAberto || !editor.getModel() || salvarAgendado) return;
+  const alvo = arquivoAberto;
+  const r = await window.api.readFile(alvo).catch(() => null);
+  // o mundo pode ter mudado durante a leitura: confere tudo de novo
+  if (!r || r.erro || r.mtime === mtimeAberto || alvo !== arquivoAberto || salvarAgendado) return;
+  const modelo = editor.getModel();
+  if (!modelo) return;
+  mtimeAberto = r.mtime;
+  if (r.conteudo === modelo.getValue()) return;
+  const vista = editor.saveViewState();
+  modelo.pushEditOperations([], [{ range: modelo.getFullModelRange(), text: r.conteudo }], () => null);
+  editor.restoreViewState(vista);
+}
+
+// Fechar a janela também não perde a última mudança: o processo principal
+// segura o fechar até este aviso (o beforeunload sozinho não espera o disco).
 window.addEventListener('beforeunload', salvarAgora);
+window.api.onVaiFechar(async () => {
+  try { await salvar(); } finally { window.api.podeFechar(); }
+});
 
 // ============================================================
 // Ctrl+J esconde e mostra o terminal (única tecla que a janela
