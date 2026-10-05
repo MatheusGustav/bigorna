@@ -651,8 +651,6 @@ function icone(nome, ehPasta, aberta = false) {
   return `<img class="icone" src="${svg}" alt="" draggable="false">`;
 }
 
-const TIPO_CAMINHO = 'application/x-bigorna-caminho';
-
 let itemAtivo = null;
 
 // Pastas já lidas do disco: caminho → onde os filhos dela estão na tela.
@@ -671,12 +669,13 @@ function linhaDaArvore(caminho, nome, ehPasta, nivel) {
   el.querySelector('span').textContent = nome;
   el.title = caminho;
   el.dados = { caminho, nome, ehPasta, nivel };
-  // Arrastar leva o caminho junto, num tipo só da Bigorna: o editor e as caixas
-  // de texto não reconhecem esse tipo, então só o terminal aceita.
+  // Arrastar leva o arquivo de verdade, pelo arrasto nativo do sistema: serve
+  // pra soltar no WhatsApp, no navegador, no Dolphin… e no terminal da
+  // própria Bigorna, que cola o caminho.
   el.draggable = true;
   el.addEventListener('dragstart', (ev) => {
-    ev.dataTransfer.setData(TIPO_CAMINHO, caminho);
-    ev.dataTransfer.effectAllowed = 'copy';
+    ev.preventDefault(); // o arrasto do HTML sai de cena; quem assume é o do sistema
+    window.api.arrastarArquivo(caminho);
   });
   return el;
 }
@@ -852,7 +851,8 @@ $('btn-lateral').addEventListener('click', () => {
 });
 
 // ============================================================
-// SOLTAR NO TERMINAL: item da lateral vira o caminho no prompt
+// SOLTAR NO TERMINAL: arquivo (da lateral ou de fora) vira o caminho
+// no prompt, igual ao Konsole
 // ============================================================
 
 // Igual ao Konsole: caminho só com letra comum vai como está; com espaço,
@@ -862,7 +862,7 @@ function caminhoProBash(caminho) {
   return "'" + caminho.replace(/'/g, "'\\''") + "'";
 }
 
-// Soltar arquivo de fora na janela faria ela navegar pro arquivo e a Bigorna
+// Soltar arquivo na janela faria ela navegar pro arquivo e a Bigorna
 // sumiria. A janela toda recusa o soltar; só o terminal abre exceção abaixo.
 window.addEventListener('dragover', (ev) => {
   if (ev.defaultPrevented) return; // o terminal já aceitou
@@ -871,8 +871,10 @@ window.addEventListener('dragover', (ev) => {
 });
 window.addEventListener('drop', (ev) => ev.preventDefault());
 
+// O arrasto da lateral é o nativo do sistema (vai pro WhatsApp, navegador…),
+// então chega aqui do mesmo jeito que um arquivo vindo do Dolphin: como Files.
 $('terminal-area').addEventListener('dragover', (ev) => {
-  if (!ev.dataTransfer.types.includes(TIPO_CAMINHO)) return;
+  if (!ev.dataTransfer.types.includes('Files')) return;
   ev.preventDefault();
   ev.dataTransfer.dropEffect = 'copy';
 });
@@ -880,7 +882,8 @@ $('terminal-area').addEventListener('dragover', (ev) => {
 // "true": pega o soltar antes da caixa de texto escondida do xterm, que
 // escreveria o caminho uma segunda vez.
 $('terminal-area').addEventListener('drop', (ev) => {
-  const caminho = ev.dataTransfer.getData(TIPO_CAMINHO);
+  const solto = ev.dataTransfer.files[0];
+  const caminho = solto ? window.api.caminhoDoArquivo(solto) : null;
   // o caminho vai pro terminal da coluna onde o mouse soltou
   const colEl = ev.target.closest('.coluna');
   const col = colunas.find((c) => c.el === colEl) || colunaAtiva;

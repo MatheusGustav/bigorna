@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, clipboard } = require('electron');
+const { contextBridge, ipcRenderer, clipboard, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   // terminais (um por aba; o id vem da janela)
@@ -31,6 +31,11 @@ contextBridge.exposeInMainWorld('api', {
   // fechar a janela espera a última gravação do editor
   onVaiFechar: (cb) => ipcRenderer.on('janela:vai-fechar', cb),
   podeFechar: () => ipcRenderer.send('janela:pode-fechar'),
+  // arrastar da lateral: o sistema leva o arquivo de verdade; e o caminho de
+  // um File solto na janela (só o preload enxerga ele)
+  arrastarArquivo: (caminho) => ipcRenderer.send('fs:arrastar', caminho),
+  caminhoDoArquivo: (arquivo) => webUtils.getPathForFile(arquivo),
+
   renomear: (de, para) => ipcRenderer.invoke('fs:rename', de, para),
   criar: (caminho, ehPasta) => ipcRenderer.invoke('fs:create', caminho, ehPasta),
   lixeira: (caminho) => ipcRenderer.invoke('fs:trash', caminho),

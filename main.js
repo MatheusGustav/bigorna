@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, net, shell: sistema } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, net, nativeImage, shell: sistema } = require('electron');
 const os = require('os');
 const path = require('path');
 const fs = require('fs/promises');
@@ -384,6 +384,19 @@ ipcMain.handle('fs:raiz-de-fora', async (_ev, pasta) => {
     if (dentro(pasta, montagem) && montagem.length > ponto.length) ponto = montagem;
   }
   return ponto !== '/' && !dentro(os.homedir(), ponto) ? ponto : pasta;
+});
+
+// ---------- arrastar da lateral: o arquivo vai de verdade ----------
+// O arrasto nativo do sistema (startDrag) leva o arquivo pra qualquer
+// programa — WhatsApp, navegador, Dolphin. O fantasma do arrasto é uma
+// folhinha pixelada embutida, porque o startDrag exige um PNG.
+const ICONE_DE_ARRASTO = nativeImage.createFromDataURL(
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAWElEQVR42mNgoDd49uzZf2IwRRZwcXHhxRRZQqwFMJqmFpBlCakWkGwJORaQZAkpkUxW6iLGAnwWk2SBlZUVUZhsC2jug6FvwWgcjMbBaBzQ0AJKMN1bKQBZDkgC0Nmn/AAAAABJRU5ErkJggg=='
+);
+ipcMain.on('fs:arrastar', (ev, caminho) => {
+  if (typeof caminho === 'string' && path.isAbsolute(caminho)) {
+    ev.sender.startDrag({ file: caminho, icon: ICONE_DE_ARRASTO });
+  }
 });
 
 ipcMain.handle('fs:list', async (_ev, dir) => {
