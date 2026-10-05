@@ -13,6 +13,7 @@ Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico
 
 ## Como a Bigorna se comporta hoje
 
+- **Ao abrir**: só o terminal na tela — a lateral começa fechada (o botão do trilho mostra). Chamada pra abrir pasta ou arquivo do sistema é a exceção: já abre com a lateral à mostra, descida até o pedido.
 - **Salvar automático**: toda mudança no editor grava sozinha (0,4s depois da última tecla). Não existe botão salvar nem estado "não salvo"; desfazer é apagar. A gravação é em dois tempos (arquivo ao lado + troca), pra queda no meio não deixar arquivo pela metade, e fechar a janela espera a última gravação. Arquivo que mudou por fora (git, Claude no terminal): sem mudança sua pendente a Bigorna recarrega sozinha; com mudança, avisa e não grava por cima — Ctrl+S é quem força a gravação na hora, por cima do que for.
 - **Clicar de novo** no arquivo aberto na lateral fecha ele.
 - **Visor**: imagem, áudio, vídeo e PDF abrem dentro da janela (só ver/tocar, não editar).
