@@ -31,8 +31,8 @@ function lerPedido() {
   const args = process.argv.slice(app.isPackaged ? 1 : 2);
   const pedido = { pasta: process.cwd() !== '/' ? process.cwd() : null, comando: null, revelar: null, arquivo: null };
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--workdir') pedido.pasta = args[++i] || pedido.pasta;
-    else if (args[i].startsWith('--workdir=')) pedido.pasta = args[i].slice(10);
+    if (args[i] === '--workdir') { pedido.pasta = args[++i] || pedido.pasta; pedido.dirigido = true; }
+    else if (args[i].startsWith('--workdir=')) { pedido.pasta = args[i].slice(10); pedido.dirigido = true; }
     else if (!args[i].startsWith('-')) {
       let alvo = args[i];
       try { if (alvo.startsWith('file://')) alvo = fileURLToPath(alvo); } catch { continue; }
@@ -55,6 +55,11 @@ function lerPedido() {
 let pedido = lerPedido(); // vale só pro primeiro terminal; depois vira null
 const pastaPedida = pedido.revelar;
 const arquivoPedido = pedido.arquivo;
+// Abertura dirigida (-e, --workdir, arquivo/pasta pedida, ou chamada de
+// dentro de uma pasta que não é a casa) abre só o que foi pedido; a abertura
+// comum é quem restaura o arranjo guardado das colunas.
+const restauraArranjo = !pedido.dirigido && !pedido.comando && !pedido.revelar && !pedido.arquivo
+  && (!pedido.pasta || pedido.pasta === os.homedir());
 
 // ---------- arquivo pedido vai pra janela que já está aberta ----------
 // Uma tomada única em /run/user/<id>/bigorna: a janela em foco toma ela pra
@@ -647,6 +652,8 @@ const ICONES_DA_ABA = {
   renomear: 'edit-rename',
   fechar: 'tab-close',
   lado: 'view-split-left-right',
+  embaixo: 'view-split-top-bottom',
+  zoom: 'view-fullscreen',
   esquerda: 'go-previous',
   direita: 'go-next',
 };
@@ -778,6 +785,28 @@ function arquivoDoPonto(jogo) {
   const nome = path.basename(jogo).replace(/[^\p{L}\p{N} ._-]/gu, '_');
   return path.join(app.getPath('userData'), 'pontos', nome + '.ponto');
 }
+
+// O arranjo da grade de terminais (linhas, colunas, tamanhos e pastas),
+// guardado ao fechar pra próxima abertura comum voltar igual.
+const arquivoDoArranjo = () => path.join(app.getPath('userData'), 'arranjo.json');
+
+ipcMain.handle('arranjo:guardar', async (_ev, dados) => {
+  try {
+    await fs.writeFile(arquivoDoArranjo(), JSON.stringify(dados));
+    return { ok: true };
+  } catch {
+    return { erro: 'gravar' };
+  }
+});
+
+ipcMain.handle('arranjo:ler', async () => {
+  if (!restauraArranjo) return null;
+  try {
+    return JSON.parse(await fs.readFile(arquivoDoArranjo(), 'utf8'));
+  } catch {
+    return null; // nunca guardou, ou o arquivo quebrou: abre o de sempre
+  }
+});
 
 ipcMain.handle('jogo:guardar-ponto', async (_ev, jogo, bytes) => {
   const arquivo = arquivoDoPonto(jogo);

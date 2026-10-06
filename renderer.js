@@ -37,22 +37,46 @@ let casa = ''; // pasta pessoal, pro título "~ bash" da aba
 
 const terminalDaVez = () => terminais.get(terminalAtivo) || null;
 
-// ---------- colunas ----------
-// A área pode ser dividida em colunas lado a lado, quantas couberem no gosto
-// do Matheus. Cada coluna tem a própria barra de abas e mostra um terminal
-// por vez; clicar numa aba só troca o terminal daquela coluna.
+// ---------- a grade: linhas de colunas ----------
+// A área se divide numa grade: linhas de cima pra baixo e, dentro de cada
+// linha, colunas lado a lado — quantas o Matheus quiser (quem limita é a
+// largura; cada coluna tem no mínimo 120px). Nada se arruma sozinho: linha e
+// coluna nascem e morrem pela mão dele (arrasto, menu, +). Cada coluna tem a
+// própria barra de abas e mostra um terminal por vez; clicar numa aba só
+// troca o terminal daquela coluna.
 
-const colunas = []; // { el, listaEl, terminaisEl, ativo }, na ordem da tela
+const linhas = []; // { el, colunas: [{ el, listaEl, terminaisEl, ativo }] }, de cima pra baixo
 let colunaAtiva = null; // a coluna do terminal com o teclado
+let colunaZoom = null; // a coluna ocupando a área inteira, se houver
 let contadorDeColunas = 0;
 
-// As colunas se arrumam em linhas: no máximo 3 por linha, e menos quando a
-// faixa do terminal está estreita (com o arquivo aberto, por exemplo) — aí
-// uma coluna vai embaixo da outra em vez de ficarem espremidas lado a lado.
-const MAXIMO_POR_LINHA = 3;
-const LARGURA_MINIMA_DE_COLUNA = 420; // abaixo disso a coluna não cabe ao lado de outra
+const todasAsColunas = () => linhas.flatMap((l) => l.colunas);
+const linhaDe = (col) => linhas.find((l) => l.colunas.includes(col));
 
 const idsDaColuna = (col) => [...terminais].filter(([, t]) => t.col === col).map(([id]) => id);
+
+// Coluna ou linha nova entra com o tamanho médio das irmãs, senão quem já
+// foi alargado no arrasto esmagaria a recém-chegada.
+function tamanhoDeEntrada(el, irmas) {
+  const medidas = irmas.map((i) => Number(i.el.style.flexGrow)).filter((n) => n > 0);
+  if (medidas.length) el.style.flexGrow = medidas.reduce((a, b) => a + b, 0) / medidas.length;
+}
+
+function criarLinhaEm(indice) {
+  const linha = { colunas: [] };
+  linha.el = document.createElement('div');
+  linha.el.className = 'linha';
+  tamanhoDeEntrada(linha.el, linhas);
+  linhas.splice(indice, 0, linha);
+  return linha;
+}
+
+function removerLinha(linha) {
+  const i = linhas.indexOf(linha);
+  if (i < 0) return;
+  linhas.splice(i, 1);
+  linha.el.remove();
+}
 
 // Encolheu ou cresceu uma coluna (janela, lateral, divisores): reajusta o
 // terminal à mostra nela. Os escondidos se ajustam ao serem ativados.
@@ -60,7 +84,7 @@ let ajustePendente = null;
 const ajustadorDeColunas = new ResizeObserver(() => {
   clearTimeout(ajustePendente);
   ajustePendente = setTimeout(() => {
-    for (const col of colunas) {
+    for (const col of todasAsColunas()) {
       const t = terminais.get(col.ativo);
       if (!t) continue;
       t.fit.fit();
@@ -69,10 +93,17 @@ const ajustadorDeColunas = new ResizeObserver(() => {
   }, 50);
 });
 
-// Cria a coluna logo depois da coluna dada (ou no fim da fila).
-const criarColuna = (aposDe) => criarColunaEm(aposDe ? colunas.indexOf(aposDe) + 1 : colunas.length);
+// Cria a coluna logo depois da coluna dada (ou no fim da última linha).
+function criarColuna(aposDe) {
+  if (aposDe && linhaDe(aposDe)) {
+    const linha = linhaDe(aposDe);
+    return criarColunaEm(linha, linha.colunas.indexOf(aposDe) + 1);
+  }
+  const linha = linhas[linhas.length - 1] || criarLinhaEm(0);
+  return criarColunaEm(linha, linha.colunas.length);
+}
 
-function criarColunaEm(indice) {
+function criarColunaEm(linha, indice) {
   const col = { ativo: null };
   col.el = document.createElement('div');
   col.el.className = 'coluna';
@@ -103,76 +134,88 @@ function criarColunaEm(indice) {
   col.el.append(abas, col.terminaisEl);
 
   col.id = ++contadorDeColunas;
-  colunas.splice(indice, 0, col);
+  tamanhoDeEntrada(col.el, linha.colunas);
+  linha.colunas.splice(indice, 0, col);
   ajustadorDeColunas.observe(col.terminaisEl);
-  arrumarLinhas();
+  arrumarTela();
   return col;
 }
 
 function removerColuna(col) {
   if (temFliperama(col)) return; // a casa do fliperama fica: ele toma a coluna inteira
-  const i = colunas.indexOf(col);
-  if (i < 0 || colunas.length < 2) return; // a última fica, mesmo vazia
-  colunas.splice(i, 1);
+  const linha = linhaDe(col);
+  if (!linha || todasAsColunas().length < 2) return; // a última fica, mesmo vazia
+  linha.colunas.splice(linha.colunas.indexOf(col), 1);
   ajustadorDeColunas.unobserve(col.terminaisEl);
   col.el.remove();
-  if (colunaAtiva === col) colunaAtiva = colunas[colunas.length - 1];
-  arrumarLinhas();
+  if (!linha.colunas.length) removerLinha(linha);
+  const todas = todasAsColunas();
+  if (!todas.includes(colunaAtiva)) colunaAtiva = todas[todas.length - 1];
+  arrumarTela();
 }
 
-// Quantas colunas cabem lado a lado na largura de agora.
-function colunasPorLinha() {
-  const largura = $('colunas').getBoundingClientRect().width;
-  return Math.max(1, Math.min(MAXIMO_POR_LINHA, Math.floor(largura / LARGURA_MINIMA_DE_COLUNA)));
-}
-
-// Põe as colunas em linhas, na ordem da fila, com uma divisa arrastável entre
-// vizinhas. Refeito a cada mudança de estrutura e quando a largura muda; se
-// nada mudou, não mexe (mexer à toa faria o terminal piscar).
+// Põe linhas e colunas na tela na ordem da grade, com uma divisa arrastável
+// entre vizinhas. Refeito a cada mudança de estrutura; se nada mudou, não
+// mexe (mexer à toa faria o terminal piscar).
 let arranjoAtual = '';
-function arrumarLinhas() {
-  const porLinha = colunasPorLinha();
-  const arranjo = porLinha + ':' + colunas.map((c) => c.id).join(',');
-  if (arranjo === arranjoAtual) return;
-  arranjoAtual = arranjo;
-
-  const recipiente = $('colunas');
-  for (const d of recipiente.querySelectorAll('.divisa-coluna')) d.remove();
-  const linhasVelhas = [...recipiente.querySelectorAll('.linha')];
-
-  for (let i = 0; i < colunas.length; i += porLinha) {
-    const linha = document.createElement('div');
-    linha.className = 'linha';
-    recipiente.appendChild(linha);
-    for (const col of colunas.slice(i, i + porLinha)) {
-      if (col !== colunas[i]) {
-        const d = document.createElement('div');
-        d.className = 'divisa-coluna';
-        d.title = 'Arraste pra mudar a largura';
-        d.addEventListener('mousedown', arrastarDivisa);
-        linha.appendChild(d);
-      }
+function arrumarTela() {
+  const arranjo = linhas.map((l) => l.colunas.map((c) => c.id).join(',')).join('|');
+  if (arranjo !== arranjoAtual) {
+    arranjoAtual = arranjo;
+    const recipiente = $('colunas');
+    for (const d of recipiente.querySelectorAll('.divisa-coluna, .divisa-entre-linhas')) d.remove();
+    for (const linha of linhas) {
+      if (linha !== linhas[0]) recipiente.appendChild(divisa('divisa-entre-linhas', arrastarDivisaDeLinhas));
       // moveBefore muda o lugar sem recriar o canvas: o desenho WebGL
-      // sobrevive. Só vale pra quem já está na tela; coluna nova entra do jeito comum.
-      if (linha.moveBefore && col.el.isConnected) linha.moveBefore(col.el, null);
-      else linha.appendChild(col.el);
+      // sobrevive. Só vale pra quem já está na tela; o novo entra do jeito comum.
+      if (recipiente.moveBefore && linha.el.isConnected) recipiente.moveBefore(linha.el, null);
+      else recipiente.appendChild(linha.el);
+      for (const col of linha.colunas) {
+        if (col !== linha.colunas[0]) linha.el.appendChild(divisa('divisa-coluna', arrastarDivisaDeColunas));
+        if (linha.el.moveBefore && col.el.isConnected) linha.el.moveBefore(col.el, null);
+        else linha.el.appendChild(col.el);
+      }
     }
   }
-  for (const l of linhasVelhas) l.remove();
+  aplicarZoom();
 }
 
-// A largura da faixa mudou (lateral, arquivo, janela): o número de colunas
-// por linha pode ter mudado junto.
-new ResizeObserver(() => arrumarLinhas()).observe($('colunas'));
+function divisa(classe, arrastar) {
+  const d = document.createElement('div');
+  d.className = classe;
+  d.title = (classe === 'divisa-coluna' ? 'Arraste pra mudar a largura' : 'Arraste pra mudar a altura') + '; duplo clique reparte ao meio';
+  d.addEventListener('mousedown', arrastar);
+  d.addEventListener('dblclick', () => repartirAoMeio(d));
+  return d;
+}
+
+// Duplo clique na divisa: as duas vizinhas repartem o espaço meio a meio.
+// Antes disso cada irmã congela no tamanho de agora, senão a conta nova
+// mexeria nas outras também.
+function repartirAoMeio(d) {
+  const antes = d.previousElementSibling;
+  const depois = d.nextElementSibling;
+  if (!antes || !depois) return;
+  const ehLinha = d.classList.contains('divisa-entre-linhas');
+  const medida = (el) => el.getBoundingClientRect()[ehLinha ? 'height' : 'width'];
+  for (const el of d.parentElement.querySelectorAll(ehLinha ? ':scope > .linha' : ':scope > .coluna')) {
+    el.style.flexGrow = medida(el);
+  }
+  const meio = (medida(antes) + medida(depois)) / 2;
+  antes.style.flexGrow = meio;
+  depois.style.flexGrow = meio;
+}
 
 // Arrastar a divisa muda a largura das duas colunas vizinhas. O flex-grow de
-// cada coluna vira a largura dela em pixels, pra conta fechar.
-function arrastarDivisa(evInicio) {
+// cada coluna da linha vira a largura dela em pixels, pra conta fechar.
+function arrastarDivisaDeColunas(evInicio) {
   evInicio.preventDefault();
   const esq = evInicio.currentTarget.previousElementSibling;
   const dir = evInicio.currentTarget.nextElementSibling;
   if (!esq || !dir) return;
-  for (const col of colunas) col.el.style.flexGrow = col.el.getBoundingClientRect().width;
+  for (const el of evInicio.currentTarget.parentElement.querySelectorAll(':scope > .coluna')) {
+    el.style.flexGrow = el.getBoundingClientRect().width;
+  }
   const wEsq = esq.getBoundingClientRect().width;
   const wDir = dir.getBoundingClientRect().width;
   const x0 = evInicio.clientX;
@@ -191,11 +234,58 @@ function arrastarDivisa(evInicio) {
   window.addEventListener('mouseup', soltar);
 }
 
+// O mesmo, em pé: a divisa entre linhas muda a altura das duas vizinhas.
+function arrastarDivisaDeLinhas(evInicio) {
+  evInicio.preventDefault();
+  const cima = evInicio.currentTarget.previousElementSibling;
+  const baixo = evInicio.currentTarget.nextElementSibling;
+  if (!cima || !baixo) return;
+  for (const l of linhas) l.el.style.flexGrow = l.el.getBoundingClientRect().height;
+  const hCima = cima.getBoundingClientRect().height;
+  const hBaixo = baixo.getBoundingClientRect().height;
+  const y0 = evInicio.clientY;
+  document.body.classList.add('arrastando-divisa-linha');
+  function mover(ev) {
+    const delta = Math.max(120 - hCima, Math.min(ev.clientY - y0, hBaixo - 120));
+    cima.style.flexGrow = hCima + delta;
+    baixo.style.flexGrow = hBaixo - delta;
+  }
+  function soltar() {
+    document.body.classList.remove('arrastando-divisa-linha');
+    window.removeEventListener('mousemove', mover);
+    window.removeEventListener('mouseup', soltar);
+  }
+  window.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', soltar);
+}
+
+// ---------- zoom: uma coluna toma a área inteira e depois volta ----------
+// Duplo clique na aba (ou o item do menu) maximiza a coluna do terminal; de
+// novo, volta ao arranjo exato de antes. Mexeu na estrutura (mover, trocar,
+// fechar a coluna), o zoom desarma sozinho.
+
+function aplicarZoom() {
+  if (colunaZoom && !linhaDe(colunaZoom)) colunaZoom = null;
+  $('colunas').classList.toggle('zoom', !!colunaZoom);
+  for (const l of linhas) l.el.classList.toggle('tem-zoom', !!colunaZoom && l.colunas.includes(colunaZoom));
+  for (const c of todasAsColunas()) c.el.classList.toggle('zoom', c === colunaZoom);
+}
+
+function alternarZoom(col) {
+  colunaZoom = colunaZoom === col ? null : col;
+  aplicarZoom();
+}
+
+function sairDoZoom() {
+  if (colunaZoom) alternarZoom(colunaZoom);
+}
+
 // Leva o terminal pra outra coluna. moveBefore muda o lugar sem recriar o
 // canvas, então o desenho WebGL do xterm sobrevive à mudança.
 function moverTerminal(id, col) {
   const t = terminais.get(id);
   if (!t || !col || t.col === col) return;
+  sairDoZoom();
   const origem = t.col;
   t.col = col;
   if (col.terminaisEl.moveBefore) col.terminaisEl.moveBefore(t.caixa, null);
@@ -217,6 +307,15 @@ function mostrarAoLado(id) {
   moverTerminal(id, criarColuna(t.col));
 }
 
+// "Mostrar embaixo": o terminal ganha uma linha nova, logo abaixo da dele.
+function mostrarEmbaixo(id) {
+  const t = terminais.get(id);
+  if (!t) return;
+  const linha = linhaDe(t.col);
+  if (idsDaColuna(t.col).length === 1 && linha.colunas.length === 1) return; // a linha já é só dele
+  moverTerminal(id, criarColunaEm(criarLinhaEm(linhas.indexOf(linha) + 1), 0));
+}
+
 // ---------- arrastar abas ----------
 // A aba se arrasta: solta na barra de outra coluna muda de coluna (e de
 // posição na fila), solta no meio de um terminal vai pra coluna dele, e solta
@@ -226,7 +325,7 @@ const TIPO_ABA = 'application/x-bigorna-aba';
 const TIPO_COLUNA = 'application/x-bigorna-coluna';
 let arrastandoAba = null; // id do terminal da aba arrastada
 let arrastandoColuna = null; // a coluna arrastada pela parte vazia da barra
-let soltarEm = null; // alvo da vez: { col, antesDe } na barra, { col, zona } no terminal, { trocarCom } de coluna
+let soltarEm = null; // alvo da vez: { col, antesDe } na barra, { col, zona } no terminal, { colAlvo, zonaDaColuna } de coluna
 
 // Muda o terminal de lugar na fila (a ordem do Map é a ordem das abas).
 // antesDe null é o fim da fila.
@@ -253,12 +352,53 @@ function limparArrasto() {
 
 // Troca duas colunas de lugar. Cada uma leva junto a largura que tinha.
 function trocarColunas(a, b) {
-  const ia = colunas.indexOf(a);
-  const ib = colunas.indexOf(b);
-  if (ia < 0 || ib < 0 || a === b) return;
-  colunas[ia] = b;
-  colunas[ib] = a;
-  arrumarLinhas(); // repõe todas na ordem nova
+  const la = linhaDe(a);
+  const lb = linhaDe(b);
+  if (!la || !lb || a === b) return;
+  sairDoZoom();
+  // os dois lugares são achados antes de escrever, senão o indexOf de b
+  // encontraria o b recém-posto no lugar de a
+  const ia = la.colunas.indexOf(a);
+  const ib = lb.colunas.indexOf(b);
+  la.colunas[ia] = b;
+  lb.colunas[ib] = a;
+  arrumarTela(); // repõe todas na ordem nova
+  desenharAbas();
+}
+
+// Leva a coluna inteira pra outra posição: dentro da própria linha ou pra
+// outra linha, levando a largura junto. A linha que esvazia vai embora.
+function moverColunaPara(col, linhaAlvo, indice) {
+  const origem = linhaDe(col);
+  if (!origem || !linhaAlvo) return;
+  const iOrigem = origem.colunas.indexOf(col);
+  if (origem === linhaAlvo) {
+    const destino = indice > iOrigem ? indice - 1 : indice;
+    if (destino === iOrigem) return; // cairia no mesmo lugar
+    sairDoZoom();
+    origem.colunas.splice(iOrigem, 1);
+    origem.colunas.splice(destino, 0, col);
+  } else {
+    sairDoZoom();
+    origem.colunas.splice(iOrigem, 1);
+    linhaAlvo.colunas.splice(Math.min(indice, linhaAlvo.colunas.length), 0, col);
+    if (!origem.colunas.length) removerLinha(origem);
+  }
+  arrumarTela();
+  desenharAbas();
+}
+
+// A coluna vira uma linha nova, inteira dela, acima ou abaixo da linha dada.
+function moverColunaParaLinhaNova(col, linhaRef, acima) {
+  const origem = linhaDe(col);
+  if (!origem || !linhas.includes(linhaRef)) return;
+  if (origem === linhaRef && origem.colunas.length === 1) return; // a linha já é só dela
+  sairDoZoom();
+  origem.colunas.splice(origem.colunas.indexOf(col), 1);
+  if (!origem.colunas.length) removerLinha(origem);
+  const nova = criarLinhaEm(linhas.indexOf(linhaRef) + (acima ? 0 : 1));
+  nova.colunas.push(col);
+  arrumarTela();
   desenharAbas();
 }
 
@@ -272,25 +412,49 @@ function mostrarSombra(x, y, largura, altura) {
   s.hidden = false;
 }
 
+// Em que pedaço da caixa o mouse está: beirada esquerda/direita, cima/baixo
+// (um quarto de cada lado) ou o meio. As beiradas dos lados ganham do canto.
+function zonaDoPonto(ev, r) {
+  if (ev.clientX < r.x + r.width / 4) return 'esquerda';
+  if (ev.clientX > r.right - r.width / 4) return 'direita';
+  if (ev.clientY < r.y + r.height / 4) return 'cima';
+  if (ev.clientY > r.bottom - r.height / 4) return 'baixo';
+  return 'meio';
+}
+
+// A sombra de cada zona: meio e lados são pedaços da caixa; cima e baixo são
+// metades da linha inteira, porque a linha nova nasce com a largura toda.
+function sombraDaZona(zona, rCaixa, rLinha) {
+  if (zona === 'meio') mostrarSombra(rCaixa.x, rCaixa.y, rCaixa.width, rCaixa.height);
+  else if (zona === 'esquerda') mostrarSombra(rCaixa.x, rCaixa.y, rCaixa.width / 2, rCaixa.height);
+  else if (zona === 'direita') mostrarSombra(rCaixa.x + rCaixa.width / 2, rCaixa.y, rCaixa.width / 2, rCaixa.height);
+  else if (zona === 'cima') mostrarSombra(rLinha.x, rLinha.y, rLinha.width, rLinha.height / 2);
+  else mostrarSombra(rLinha.x, rLinha.y + rLinha.height / 2, rLinha.width, rLinha.height / 2);
+}
+
 $('colunas').addEventListener('dragover', (ev) => {
   const ehColuna = ev.dataTransfer.types.includes(TIPO_COLUNA);
   if (!ehColuna && !ev.dataTransfer.types.includes(TIPO_ABA)) return;
   const colEl = ev.target.closest('.coluna');
-  const col = colunas.find((c) => c.el === colEl);
+  const col = todasAsColunas().find((c) => c.el === colEl);
   if (!col) return;
 
-  // coluna arrastada: qualquer ponto de outra coluna é alvo de troca
+  // coluna arrastada: o meio de outra coluna troca as duas, as beiradas dos
+  // lados inserem ali, e cima/baixo viram uma linha nova (vale até nela mesma,
+  // pra destacar a coluna da linha onde está)
   if (ehColuna) {
-    if (col === arrastandoColuna) {
+    const zona = zonaDoPonto(ev, col.el.getBoundingClientRect());
+    const propria = col === arrastandoColuna;
+    const viraLinha = zona === 'cima' || zona === 'baixo';
+    if (propria && (!viraLinha || linhaDe(col).colunas.length === 1)) {
       soltarEm = null;
       $('sombra-de-soltar').hidden = true;
       return; // em cima de si mesma não há o que trocar
     }
     ev.preventDefault();
     ev.dataTransfer.dropEffect = 'move';
-    soltarEm = { trocarCom: col };
-    const r = col.el.getBoundingClientRect();
-    mostrarSombra(r.x, r.y, r.width, r.height);
+    soltarEm = { colAlvo: col, zonaDaColuna: zona };
+    sombraDaZona(zona, col.el.getBoundingClientRect(), linhaDe(col).el.getBoundingClientRect());
     return;
   }
 
@@ -326,13 +490,12 @@ $('colunas').addEventListener('dragover', (ev) => {
     return;
   }
 
-  // no terminal: beirada esquerda ou direita cria coluna, o meio só muda de coluna
+  // no terminal: beirada esquerda ou direita cria coluna, cima ou baixo cria
+  // linha, e o meio só muda de coluna
   const r = col.terminaisEl.getBoundingClientRect();
-  const zona = ev.clientX < r.x + r.width / 4 ? 'esquerda' : ev.clientX > r.right - r.width / 4 ? 'direita' : 'meio';
+  const zona = zonaDoPonto(ev, r);
   soltarEm = { col, zona };
-  if (zona === 'meio') mostrarSombra(r.x, r.y, r.width, r.height);
-  else if (zona === 'esquerda') mostrarSombra(r.x, r.y, r.width / 2, r.height);
-  else mostrarSombra(r.x + r.width / 2, r.y, r.width / 2, r.height);
+  sombraDaZona(zona, r, linhaDe(col).el.getBoundingClientRect());
 });
 
 $('colunas').addEventListener('dragleave', (ev) => {
@@ -354,7 +517,15 @@ $('colunas').addEventListener('drop', (ev) => {
   if (!alvo) return;
 
   if (ehColuna) {
-    if (colArrastada && alvo.trocarCom) trocarColunas(colArrastada, alvo.trocarCom);
+    if (!colArrastada || !alvo.colAlvo) return;
+    const linhaAlvo = linhaDe(alvo.colAlvo);
+    if (!linhaAlvo) return;
+    if (alvo.zonaDaColuna === 'meio') trocarColunas(colArrastada, alvo.colAlvo);
+    else if (alvo.zonaDaColuna === 'cima' || alvo.zonaDaColuna === 'baixo') {
+      moverColunaParaLinhaNova(colArrastada, linhaAlvo, alvo.zonaDaColuna === 'cima');
+    } else {
+      moverColunaPara(colArrastada, linhaAlvo, linhaAlvo.colunas.indexOf(alvo.colAlvo) + (alvo.zonaDaColuna === 'direita' ? 1 : 0));
+    }
     return;
   }
 
@@ -374,17 +545,32 @@ $('colunas').addEventListener('drop', (ev) => {
     else moverTerminal(id, alvo.col);
     return;
   }
-  // beirada: coluna nova no lado escolhido — menos quando a aba está sozinha
-  // na própria coluna e cairia no mesmo lugar
-  const indice = colunas.indexOf(alvo.col) + (alvo.zona === 'direita' ? 1 : 0);
-  const iOrigem = colunas.indexOf(t.col);
-  if (idsDaColuna(t.col).length === 1 && (indice === iOrigem || indice === iOrigem + 1)) return;
-  moverTerminal(id, criarColunaEm(indice));
+  if (alvo.zona === 'cima' || alvo.zona === 'baixo') {
+    // beirada de cima ou de baixo: linha nova — menos quando a aba está
+    // sozinha numa linha só dela e cairia no mesmo lugar
+    const linha = linhaDe(alvo.col);
+    const indice = linhas.indexOf(linha) + (alvo.zona === 'baixo' ? 1 : 0);
+    if (idsDaColuna(t.col).length === 1 && linhaDe(t.col).colunas.length === 1) {
+      const iOrigem = linhas.indexOf(linhaDe(t.col));
+      if (indice === iOrigem || indice === iOrigem + 1) return;
+    }
+    moverTerminal(id, criarColunaEm(criarLinhaEm(indice), 0));
+    return;
+  }
+  // beirada dos lados: coluna nova no lado escolhido — menos quando a aba
+  // está sozinha na própria coluna e cairia no mesmo lugar
+  const linha = linhaDe(alvo.col);
+  const indice = linha.colunas.indexOf(alvo.col) + (alvo.zona === 'direita' ? 1 : 0);
+  if (idsDaColuna(t.col).length === 1 && linhaDe(t.col) === linha) {
+    const iOrigem = linha.colunas.indexOf(t.col);
+    if (indice === iOrigem || indice === iOrigem + 1) return;
+  }
+  moverTerminal(id, criarColunaEm(linha, indice));
 }, true); // na captura: passa na frente do soltar de caminho do terminal
 
 async function criarTerminal(pasta, col) {
   $('shell-fim').hidden = true;
-  if (!col || !colunas.includes(col)) col = colunaAtiva || colunas[0] || criarColuna();
+  if (!col || !linhaDe(col)) col = (colunaAtiva && linhaDe(colunaAtiva) && colunaAtiva) || todasAsColunas()[0] || criarColuna();
 
   const id = proximoTerminal++;
   const caixa = document.createElement('div');
@@ -490,7 +676,7 @@ function fecharTerminal(id, jaEncerrou) {
   if (terminalAtivo === id) {
     terminalAtivo = null;
     // o teclado vai pro terminal à mostra na mesma coluna, ou na da vez
-    const prox = (colunas.includes(t.col) && t.col.ativo) || (colunaAtiva && colunaAtiva.ativo);
+    const prox = (linhaDe(t.col) && t.col.ativo) || (colunaAtiva && colunaAtiva.ativo);
     if (prox) return ativarTerminal(prox); // ele já redesenha as abas
   }
   desenharAbas();
@@ -558,6 +744,11 @@ function abaDoTerminal(id) {
   });
   aba.appendChild(x);
   aba.addEventListener('click', () => ativarTerminal(id));
+  // duplo clique: a coluna do terminal toma a área inteira; de novo, volta
+  aba.addEventListener('dblclick', () => {
+    const dono = terminais.get(id);
+    if (dono) alternarZoom(dono.col);
+  });
   aba.draggable = true;
   aba.addEventListener('dragstart', (ev) => {
     if (aba.querySelector('input')) return ev.preventDefault(); // renomeando
@@ -579,7 +770,7 @@ function desenharAbas() {
   // digitado; no meio de um arrasto, sumiria com a aba da mão do mouse
   if ($('colunas').querySelector('.abas input') || arrastandoAba !== null) return;
 
-  for (const col of colunas) {
+  for (const col of todasAsColunas()) {
     col.el.classList.toggle('foco', col === colunaAtiva);
     // o terminal à mostra leva a cor do repositório dele num fio no topo
     const ativo = terminais.get(col.ativo);
@@ -888,7 +1079,7 @@ $('terminal-area').addEventListener('drop', (ev) => {
   const caminho = solto ? window.api.caminhoDoArquivo(solto) : null;
   // o caminho vai pro terminal da coluna onde o mouse soltou
   const colEl = ev.target.closest('.coluna');
-  const col = colunas.find((c) => c.el === colEl) || colunaAtiva;
+  const col = todasAsColunas().find((c) => c.el === colEl) || colunaAtiva;
   const t = (col && terminais.get(col.ativo)) || terminalDaVez();
   if (!caminho || !t) return;
   ev.preventDefault();
@@ -1043,13 +1234,20 @@ function itensDaAba(id) {
   const t = terminais.get(id);
   const branch = t.info && t.info.branch;
   const ic = iconesDaAba || {};
-  const i = colunas.indexOf(t.col);
+  const linha = linhaDe(t.col);
+  const i = linha.colunas.indexOf(t.col);
   const sozinho = idsDaColuna(t.col).length === 1;
   return [
     // sozinho na coluna, mostrar ao lado não muda nada: fica desligado
+    // (e sozinho numa linha só dele, mostrar embaixo também não)
     { texto: 'Mostrar ao lado', icone: ic.lado, desligado: sozinho, acao: () => mostrarAoLado(id) },
-    { texto: 'Mover pra coluna da esquerda', icone: ic.esquerda, desligado: i < 1, acao: () => moverTerminal(id, colunas[i - 1]) },
-    { texto: 'Mover pra coluna da direita', icone: ic.direita, desligado: i === colunas.length - 1, acao: () => moverTerminal(id, colunas[i + 1]) },
+    { texto: 'Mostrar embaixo', icone: ic.embaixo, desligado: sozinho && linha.colunas.length === 1, acao: () => mostrarEmbaixo(id) },
+    { texto: 'Mover pra coluna da esquerda', icone: ic.esquerda, desligado: i < 1, acao: () => moverTerminal(id, linha.colunas[i - 1]) },
+    { texto: 'Mover pra coluna da direita', icone: ic.direita, desligado: i === linha.colunas.length - 1, acao: () => moverTerminal(id, linha.colunas[i + 1]) },
+    '-',
+    colunaZoom === t.col
+      ? { texto: 'Voltar do zoom', icone: ic.zoom, acao: () => alternarZoom(t.col) }
+      : { texto: 'Ocupar a área toda', icone: ic.zoom, desligado: todasAsColunas().length < 2, acao: () => alternarZoom(t.col) },
     '-',
     branch && !BRANCHES_DA_PRINCIPAL.includes(branch)
       ? { texto: `Abrir worktree de ${branch}`, icone: ic.worktree, acao: () => abrirWorktree(id) }
@@ -1495,8 +1693,9 @@ function botaoDaMesa(texto, aoClicar, tecla) {
 // A coluna onde o fliperama entra: a última, se já houver mais de uma (ou se
 // ela estiver sem terminal); senão uma nova, à direita da única que existe.
 function colunaDoFliperama() {
-  const ultima = colunas[colunas.length - 1];
-  if (ultima && (colunas.length > 1 || !idsDaColuna(ultima).length)) return ultima;
+  const todas = todasAsColunas();
+  const ultima = todas[todas.length - 1];
+  if (ultima && (todas.length > 1 || !idsDaColuna(ultima).length)) return ultima;
   return criarColuna();
 }
 
@@ -1546,6 +1745,7 @@ async function abrirFliperama(caminho) {
     else fliperama.tela.focus();
     return;
   }
+  sairDoZoom(); // a coluna dele pode estar escondida atrás do zoom de outra
   if ($('terminal-area').hidden) alternarTerminal(); // a casa dele estava escondida (Ctrl+J)
 
   const el = pedacoDaMesa('fliperama');
@@ -1971,7 +2171,12 @@ async function recarregarArquivoAberto() {
 // segura o fechar até este aviso (o beforeunload sozinho não espera o disco).
 window.addEventListener('beforeunload', salvarAgora);
 window.api.onVaiFechar(async () => {
-  try { await salvar(); } finally { window.api.podeFechar(); }
+  // o arranjo das colunas vai junto da última gravação do editor
+  try {
+    await Promise.all([salvar(), window.api.guardarArranjo(arranjoDaTela()).catch(() => {})]);
+  } finally {
+    window.api.podeFechar();
+  }
 });
 
 // ============================================================
@@ -2024,6 +2229,9 @@ $('divisor-lateral').addEventListener('mousedown', (evInicio) => {
   window.addEventListener('mouseup', soltar);
 });
 
+// Duplo clique devolve a largura de partida.
+$('divisor-lateral').addEventListener('dblclick', () => $('lateral').style.setProperty('--largura', '240px'));
+
 // ============================================================
 // DIVISOR entre o arquivo e o terminal (largura do arquivo)
 // ============================================================
@@ -2046,6 +2254,63 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
   window.addEventListener('mouseup', soltar);
 });
 
+// Duplo clique devolve o meio a meio.
+$('divisor').addEventListener('dblclick', () => { $('editor-area').style.width = ''; });
+
+// ============================================================
+// O ARRANJO GUARDADO: fechar hoje, abrir amanhã igual
+// ============================================================
+// Ao fechar, a grade (linhas, colunas, tamanhos, a pasta e o nome de cada
+// terminal) vai pra pasta de configuração; a próxima abertura comum remonta
+// tudo. Abertura dirigida (-e, --workdir, arquivo ou pasta pedida) não
+// restaura — quem decide é o processo principal, que conhece o pedido.
+
+function arranjoDaTela() {
+  return {
+    versao: 1,
+    linhas: linhas.map((linha) => ({
+      altura: Number(linha.el.style.flexGrow) || null,
+      colunas: linha.colunas.filter((col) => idsDaColuna(col).length).map((col) => {
+        const ids = idsDaColuna(col);
+        return {
+          largura: Number(col.el.style.flexGrow) || null,
+          ativo: Math.max(0, ids.indexOf(col.ativo)),
+          terminais: ids.map((id) => {
+            const t = terminais.get(id);
+            return { pasta: (t.info && t.info.cwd) || null, nome: t.nome || null };
+          }),
+        };
+      }),
+    })).filter((l) => l.colunas.length),
+  };
+}
+
+async function restaurarArranjo(dados) {
+  try {
+    for (const l of dados.linhas.slice(0, 12)) {
+      if (!l || !Array.isArray(l.colunas) || !l.colunas.length) continue;
+      const linha = criarLinhaEm(linhas.length);
+      if (l.altura > 0) linha.el.style.flexGrow = l.altura;
+      for (const c of l.colunas.slice(0, 12)) {
+        if (!c || !Array.isArray(c.terminais) || !c.terminais.length) continue;
+        const col = criarColunaEm(linha, linha.colunas.length);
+        if (c.largura > 0) col.el.style.flexGrow = c.largura;
+        for (const info of c.terminais.slice(0, 20)) {
+          const id = await criarTerminal(typeof info?.pasta === 'string' ? info.pasta : undefined, col);
+          if (typeof info?.nome === 'string' && info.nome) terminais.get(id).nome = info.nome;
+        }
+        const ids = idsDaColuna(col);
+        mostrarNaColuna(ids[c.ativo] ?? ids[ids.length - 1]);
+      }
+      if (!linha.colunas.length) removerLinha(linha); // linha guardada sem nada de pé
+    }
+  } catch (erro) {
+    console.warn('[arranjo] não consegui restaurar:', erro);
+  }
+  if (!terminais.size) await criarTerminal(); // arranjo vazio ou quebrado: o de sempre
+  desenharAbas();
+}
+
 // ============================================================
 // PARTIDA
 // ============================================================
@@ -2066,7 +2331,10 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
     await revelarPasta(pastaPedida, casa, $('arvore'));
     pastaPedida = null;
   }
-  await criarTerminal();
+  // abertura comum volta no arranjo de ontem; dirigida abre só o pedido
+  const salvo = await window.api.lerArranjo().catch(() => null);
+  if (salvo && Array.isArray(salvo.linhas) && salvo.linhas.length) await restaurarArranjo(salvo);
+  else await criarTerminal();
   atualizarTrilho();
   if (arquivo) await abrirPedido(arquivo);
 })();

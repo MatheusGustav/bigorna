@@ -396,20 +396,29 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
 }
 /* a lateral fechada ainda ocupa a margem dela, então nada cola no trilho */
 
-/* ---------- colunas de terminais lado a lado ---------- */
+/* ---------- a grade de terminais: linhas de colunas ---------- */
 #colunas {
   flex: 1;
   min-height: 0;
   display: flex;
-  flex-direction: column; /* linhas de colunas: até 3 por linha */
+  flex-direction: column; /* as linhas, de cima pra baixo */
 }
 .linha {
   flex: 1 1 0;
   min-height: 0;
   display: flex;
   align-items: stretch;
+  overflow: hidden; /* colunas demais não vazam da janela */
 }
-.linha + .linha .coluna { margin-top: 1px; } /* a linha de cima já deixou o respiro */
+.divisa-entre-linhas {
+  height: 6px;
+  flex: none;
+  cursor: row-resize;
+}
+.divisa-entre-linhas:hover { background: #1a1a1a; }
+/* zoom: a coluna marcada toma a área inteira; as outras esperam escondidas */
+#colunas.zoom > .linha:not(.tem-zoom), #colunas.zoom > .divisa-entre-linhas { display: none; }
+.linha.tem-zoom > .coluna:not(.zoom), .linha.tem-zoom > .divisa-coluna { display: none; }
 .coluna {
   flex: 1 1 0;
   min-width: 120px;
