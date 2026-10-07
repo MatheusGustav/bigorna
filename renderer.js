@@ -627,7 +627,13 @@ async function criarTerminal(pasta, col) {
   term.onData((data) => window.api.ptyWrite(id, data));
 
   fit.fit();
-  await window.api.ptySpawn(id, term.cols, term.rows, pasta);
+  // O bash pode nem nascer (shell quebrado, pasta estranha): sem isso a aba
+  // ficava na tela com um terminal morto dentro, mostrando "…" pra sempre.
+  if (!await window.api.ptySpawn(id, term.cols, term.rows, pasta)) {
+    fecharTerminal(id, true);
+    avisar('não consegui abrir o terminal');
+    return null;
+  }
   ativarTerminal(id);
   atualizarInfo(id); // batiza a aba sem esperar a próxima rodada do relógio
   return id;
@@ -1399,6 +1405,9 @@ async function renomear(linha) {
     arquivoAberto = destino + arquivoAberto.slice(caminho.length);
     $('nome-arquivo').textContent = arquivoAberto;
   }
+  // O "último texto" que o botão do editor reabre também muda de nome,
+  // senão o botão tentaria abrir o caminho que não existe mais.
+  if (dentroDe(ultimoTexto, caminho)) ultimoTexto = destino + ultimoTexto.slice(caminho.length);
   await recarregarPasta(pastaDe(caminho));
 }
 
@@ -1564,8 +1573,11 @@ async function abrirMidia(caminho, tipo) {
   el.src = endereco;
 
   // Arquivo que o Chromium não consegue ler (ex.: vídeo em formato raro).
+  // O erro pode chegar atrasado, com outro arquivo já na tela: só fecha se
+  // o que falhou ainda é o que está aberto.
   if (tipo !== 'pdf') {
     el.addEventListener('error', () => {
+      if (arquivoAberto !== caminho) return;
       avisar(tipo === 'imagem' ? 'não consegui mostrar essa imagem' : 'não consegui tocar esse arquivo');
       fecharArquivo();
     });
