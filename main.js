@@ -663,6 +663,12 @@ ipcMain.on('acao:abrir-com', (_ev, programa, caminho) => {
   if (programa.endsWith('.desktop') && path.isAbsolute(caminho)) soltar('gio', ['launch', programa, caminho]);
 });
 
+// Link escrito no terminal, aberto com Ctrl+clique: vai pro navegador do
+// sistema. Só http e https — file:// e outros esquemas não saem daqui.
+ipcMain.on('acao:abrir-link', (_ev, url) => {
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) sistema.openExternal(url);
+});
+
 ipcMain.on('acao:transcrever', (_ev, caminho) => {
   if (path.isAbsolute(caminho)) soltar(path.join(os.homedir(), '.local/bin/transcrever'), ['--janela', caminho]);
 });

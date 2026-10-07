@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   ptyKill: (id) => ipcRenderer.send('pty:kill', id),
   ptyInfo: (id) => ipcRenderer.invoke('pty:info', id),
   onPtyData: (cb) => ipcRenderer.on('pty:data', (_ev, id, data) => cb(id, data)),
+  abrirLink: (url) => ipcRenderer.send('acao:abrir-link', url),
   onPtyExit: (cb) => ipcRenderer.on('pty:exit', (_ev, id, codigo) => cb(id, codigo)),
 
   // worktree a partir da aba do terminal
