@@ -1833,10 +1833,12 @@ async function abrirFliperama(caminho) {
 // com terminal em cima, o terminal fica com a coluna inteira.
 async function fecharFliperama() {
   if (!fliperama) return;
-  await guardarPonto();
-  desligarEmulador();
+  // As referências saem antes do await: o segundo clique no × (ou o Ctrl+Q
+  // junto) via o fliperama nulo no meio do caminho e quebrava por dentro.
   const { col, el, divisa } = fliperama;
   fliperama = null;
+  await guardarPonto();
+  desligarEmulador();
   el.remove();
   divisa.remove();
   col.el.classList.remove('fl-inteira');
@@ -1953,8 +1955,9 @@ async function rodarJogo(caminho) {
       : 'não consegui ler esse arquivo');
   }
 
+  let novo;
   try {
-    jogo = await Nostalgist.launch({
+    novo = await Nostalgist.launch({
       core,
       element: tela,
       size: 'auto', // quem manda no tamanho é o console, não o tamanho da janela:
@@ -1967,9 +1970,17 @@ async function rodarJogo(caminho) {
       rom: { fileName: caminho.slice(caminho.lastIndexOf('/') + 1), fileContent: fita.bytes },
     });
   } catch {
-    return avisar('esse arquivo não abriu como jogo');
+    if (jogoPedido === caminho) avisar('esse arquivo não abriu como jogo');
+    return;
   }
-  if (jogoPedido !== caminho) return; // trocou de jogo enquanto este subia
+  // Trocou de jogo (ou fechou o fliperama) enquanto este subia: o emulador
+  // recém-nascido é desligado, senão ficava rodando no escuro, com som e
+  // tudo, por baixo do outro. O canvas fica: é do jogo que valeu.
+  if (jogoPedido !== caminho || !fliperama) {
+    novo.exit({ removeCanvas: false });
+    return;
+  }
+  jogo = novo;
 
   jogoAtual = caminho;
   desenharAbas(); // a aba troca "preparando" pelo nome valendo
@@ -2041,15 +2052,25 @@ $('btn-casa').addEventListener('click', async () => {
   atualizarTrilho();
 });
 
+// Cada abertura leva uma senha: clicou noutro arquivo enquanto um grande
+// ainda carregava, a leitura atrasada do primeiro é jogada fora — senão o
+// clique antigo vencia o novo e a tela mostrava um com o outro marcado.
+let pedidosDeAbrir = 0;
+
 async function abrirArquivo(caminho) {
   salvarAgora(); // o arquivo que está saindo não perde a última mudança
 
   // Imagem, som, vídeo, PDF e jogo não vão pro editor de texto: abrem no visor.
   const tipo = tipoDeMidia(caminho);
   if (tipo === 'jogo') return abrirFliperama(caminho); // vai pra área dos terminais
-  if (tipo) return abrirMidia(caminho, tipo);
+  if (tipo) {
+    pedidosDeAbrir++; // a mídia também cancela leitura de texto a caminho
+    return abrirMidia(caminho, tipo);
+  }
 
+  const pedido = ++pedidosDeAbrir;
   const r = await window.api.readFile(caminho).catch(() => ({ erro: 'leitura' }));
+  if (pedido !== pedidosDeAbrir) return; // clicou noutro enquanto o disco lia
   if (r.erro) {
     avisar(
       r.erro === 'binario' ? 'esse arquivo não é texto' :
@@ -2060,6 +2081,7 @@ async function abrirArquivo(caminho) {
   }
 
   await monacoPronto();
+  if (pedido !== pedidosDeAbrir) return; // o Monaco demorou e o clique mudou
 
   if (!editor) {
     editor = monaco.editor.create($('editor'), {
@@ -2135,8 +2157,12 @@ async function salvar(forcado) {
   salvarAgendado = null;
   // Sem modelo é mídia no visor: salvar aqui escreveria texto em cima dela.
   if (!editor || !editor.getModel() || !arquivoAberto) return;
+  const alvo = arquivoAberto; // o arquivo pode trocar enquanto o disco grava
   try {
-    const r = await window.api.writeFile(arquivoAberto, editor.getValue(), forcado ? null : mtimeAberto);
+    const r = await window.api.writeFile(alvo, editor.getValue(), forcado ? null : mtimeAberto);
+    // Trocou de arquivo durante a gravação: o mtime que voltou é do antigo,
+    // e gravar ele em cima do novo dispararia "mudou por fora" à toa.
+    if (alvo !== arquivoAberto) return;
     // Alguém (git, Claude no terminal) mexeu no arquivo depois que a janela
     // leu: gravar agora apagaria a mudança dele. Ctrl+S é quem decide.
     if (r.erro === 'mudou-por-fora') return avisar('o arquivo mudou por fora da Bigorna — Ctrl+S grava por cima');
