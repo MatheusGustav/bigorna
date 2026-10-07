@@ -19,6 +19,23 @@ const OPCOES_DO_TERMINAL = {
   },
 };
 
+// Tamanho da letra de todos os terminais de uma vez: Ctrl+= aumenta,
+// Ctrl+− diminui, Ctrl+0 volta pro padrão, e Ctrl+rodinha também vale —
+// os mesmos do Konsole. Os escondidos se acertam ao serem mostrados.
+const LETRA_PADRAO = OPCOES_DO_TERMINAL.fontSize;
+function mudarLetra(nova) {
+  nova = Math.max(6, Math.min(32, nova));
+  if (nova === OPCOES_DO_TERMINAL.fontSize) return;
+  OPCOES_DO_TERMINAL.fontSize = nova;
+  for (const [id, t] of terminais) {
+    t.term.options.fontSize = nova;
+    if (t.col.ativo === id) {
+      t.fit.fit();
+      window.api.ptyResize(id, t.term.cols, t.term.rows);
+    }
+  }
+}
+
 // Cores das etiquetas de grupo. Cada repositório pega a próxima da fila e
 // fica com ela; acabando as cores, a fila recomeça. Verde, amarelo e vermelho
 // primeiro (ordem do Matheus); daí em diante, o que combinar com o preto.
@@ -659,8 +676,24 @@ async function criarTerminal(pasta, col) {
       ev.preventDefault();
       return false;
     }
+    // Ctrl com + (ou =), − e 0: o tamanho da letra, igual ao Konsole. Pelo
+    // ev.key, pra valer em qualquer teclado (no ABNT2 o + é Shift+=).
+    if (ev.ctrlKey && !ev.altKey && ['+', '=', '-', '0'].includes(ev.key)) {
+      mudarLetra(ev.key === '0' ? LETRA_PADRAO
+        : OPCOES_DO_TERMINAL.fontSize + (ev.key === '-' ? -1 : 1));
+      ev.preventDefault();
+      return false;
+    }
     return true;
   });
+
+  // Ctrl+rodinha em cima do terminal também muda a letra, igual ao Konsole.
+  caixa.addEventListener('wheel', (ev) => {
+    if (!ev.ctrlKey) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    mudarLetra(OPCOES_DO_TERMINAL.fontSize + ((ev.deltaY || ev.deltaX) > 0 ? -1 : 1));
+  }, { passive: false, capture: true });
 
   // O sino (BEL) de um terminal escondido atrás de outra aba fica marcado
   // na aba com um ponto aceso: o Claude Code apita quando termina ou quando
