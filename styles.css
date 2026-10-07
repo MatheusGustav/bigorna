@@ -491,6 +491,8 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
 /* na coluna sem o foco do teclado, a aba ativa fica um tom mais apagada */
 .coluna:not(.foco) .aba.ativa { color: #b4b4b4; }
 .aba .claude { font-size: 10px; color: var(--brasa); }
+/* o terminal escondido apitou (sino): um ponto aceso até a aba ser aberta */
+.aba .sino { font-size: 15px; line-height: 1; color: var(--brasa); }
 .aba .x { opacity: .6; font-size: 19px; line-height: 1; margin-top: -2px; }
 .aba .x:hover { opacity: 1; }
 .aba.arrastando { opacity: .35; }

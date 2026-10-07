@@ -621,9 +621,20 @@ async function criarTerminal(pasta, col) {
     return true;
   });
 
+  // O sino (BEL) de um terminal escondido atrás de outra aba fica marcado
+  // na aba com um ponto aceso: o Claude Code apita quando termina ou quando
+  // quer resposta, e sem a marca o apito de quem está atrás passava em
+  // branco. Trazer o terminal pra frente apaga a marca.
+  term.onBell(() => {
+    const t = terminais.get(id);
+    if (!t || t.col.ativo === id || t.sino) return;
+    t.sino = true;
+    desenharAbas();
+  });
+
   // Entra no mapa antes do bash nascer, senão a primeira letra do prompt
   // poderia chegar sem ter quem a receba.
-  terminais.set(id, { term, fit, caixa, info: null, nome: null, col });
+  terminais.set(id, { term, fit, caixa, info: null, nome: null, col, sino: false });
   term.onData((data) => window.api.ptyWrite(id, data));
 
   fit.fit();
@@ -638,6 +649,7 @@ function mostrarNaColuna(id) {
   const t = terminais.get(id);
   if (!t) return;
   t.col.ativo = id;
+  t.sino = false; // à mostra, o apito já foi visto
   for (const [outro, o] of terminais) {
     if (o.col === t.col) o.caixa.classList.toggle('escondida', outro !== id);
   }
@@ -731,6 +743,13 @@ function abaDoTerminal(id) {
     marca.textContent = '✳';
     marca.title = 'Claude rodando aqui';
     aba.appendChild(marca);
+  }
+  if (t.sino) {
+    const sino = document.createElement('span');
+    sino.className = 'sino';
+    sino.textContent = '•';
+    sino.title = 'apitou enquanto estava escondido';
+    aba.appendChild(sino);
   }
   const titulo = Object.assign(document.createElement('span'), { className: 'titulo', textContent: tituloDaAba(t) });
   aba.appendChild(titulo);
