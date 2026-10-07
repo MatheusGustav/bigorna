@@ -603,6 +603,41 @@ async function criarTerminal(pasta, col) {
     console.warn('[terminal] sem WebGL, usando o desenho comum:', erro);
   }
 
+  // Caminho de arquivo escrito na tela (começando com / ou ~) vira link:
+  // passando o mouse ele se sublinha, e Ctrl+clique abre no editor, com a
+  // lateral descendo até ele. Um :12 no fim (do jeito que o Claude Code
+  // imprime) já leva o cursor pra linha. O (?<![\w:/]) impede que o meio
+  // de um https://x ou de outro caminho seja lido como caminho novo.
+  const CAMINHO_NA_TELA = /(?<![\w:/])(?:~|\/)[\w.+@%\-/:]+/g;
+  term.registerLinkProvider({
+    provideLinks(numeroDaLinha, entregar) {
+      const linhaDaTela = term.buffer.active.getLine(numeroDaLinha - 1);
+      if (!linhaDaTela) return entregar(undefined);
+      const texto = linhaDaTela.translateToString(true);
+      const links = [];
+      for (const achado of texto.matchAll(CAMINHO_NA_TELA)) {
+        let caminho = achado[0].replace(/[.,;:]+$/, ''); // pontuação de frase não é do caminho
+        let linhaDoCursor = null;
+        const comLinha = caminho.match(/:(\d+)(?::\d+)?$/); // :linha ou :linha:coluna
+        if (comLinha) {
+          linhaDoCursor = Number(comLinha[1]);
+          caminho = caminho.slice(0, comLinha.index);
+        }
+        if (caminho.includes(':') || !caminho.includes('/') || caminho.length < 3) continue;
+        if (caminho.startsWith('~')) caminho = casa + caminho.slice(1);
+        links.push({
+          range: {
+            start: { x: achado.index + 1, y: numeroDaLinha },
+            end: { x: achado.index + achado[0].length, y: numeroDaLinha },
+          },
+          text: achado[0],
+          activate: (ev) => { if (ev.ctrlKey) abrirCaminhoDaTela(caminho, linhaDoCursor); },
+        });
+      }
+      entregar(links.length ? links : undefined);
+    },
+  });
+
   // Nenhum atalho próprio: tudo vai pro bash. As duas únicas exceções são as
   // mesmas do Konsole: Ctrl+Shift+C copia e Ctrl+Shift+V cola.
   term.attachCustomKeyEventHandler((ev) => {
@@ -808,6 +843,19 @@ function desenharAbas() {
   }
   arrumarFliperama(); // em pé ou deitado, conforme a coluna dele tenha terminal
   atualizarFora(); // o terminal da vez pode ter mudado de pasta, ou outro virou a vez
+}
+
+// O Ctrl+clique num caminho impresso no terminal: abre como se tivesse
+// sido pedido de fora (editor ou visor, lateral descendo junto) e, se
+// veio com :linha, o cursor já cai nela.
+async function abrirCaminhoDaTela(caminho, linha) {
+  await abrirPedido(caminho);
+  if (linha && caminho === arquivoAberto && editor && editor.getModel()) {
+    const alvo = Math.min(linha, editor.getModel().getLineCount());
+    editor.setPosition({ lineNumber: alvo, column: 1 });
+    editor.revealLineInCenter(alvo);
+    editor.focus();
+  }
 }
 
 // ============================================================
