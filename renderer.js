@@ -2129,6 +2129,7 @@ function vigiarPastaDoArquivo(caminho) {
 // Fecha o que está na tela (texto ou mídia) e volta pra tela de nenhum arquivo.
 function fecharArquivo() {
   salvarAgora(); // fechar não perde a última mudança
+  pedidosDeAbrir++; // leitura a caminho não reabre o que acabou de fechar
 
   limparVisor();
   $('visor').hidden = true;
