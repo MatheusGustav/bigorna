@@ -734,6 +734,8 @@ function abaDoTerminal(id) {
   }
   const titulo = Object.assign(document.createElement('span'), { className: 'titulo', textContent: tituloDaAba(t) });
   aba.appendChild(titulo);
+  // nome comprido é cortado pelo CSS; o mouse parado mostra a pasta inteira
+  aba.title = (t.info && t.info.cwd) || '';
   const x = document.createElement('span');
   x.className = 'x';
   x.textContent = '×';

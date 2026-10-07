@@ -482,6 +482,9 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   cursor: pointer;
 }
 .aba:hover { color: #b4b4b4; }
+/* nome comprido (branch quilométrica) não engole a barra: corta com
+   reticências; o title da aba mostra a pasta inteira ao parar o mouse */
+.aba .titulo { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .aba.alvo-do-menu { color: var(--texto); }      /* clicada com o botão direito */
 .aba .caixa-nome { width: 100px; flex: none; font-size: 13px; }
 /* a ativa fica entre colchetes na cor do grupo */
