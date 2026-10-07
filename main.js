@@ -351,7 +351,8 @@ ipcMain.handle('git:worktree', async (_ev, cwd) => {
 
 // O caminho de volta: a worktree fecha e a pasta dela some do disco. A
 // branch continua existindo no repositório — o que morre é só a casa
-// emprestada. Só fecha com tudo commitado, e com confirmação na tela.
+// emprestada. Só fecha com tudo commitado, e com confirmação na tela que
+// lista o que some junto sem estar no git.
 ipcMain.handle('git:fechar-worktree', async (ev, cwd) => {
   if (!cwd || !path.isAbsolute(cwd)) return { erro: 'pasta' };
   let repo, topo, branch;
@@ -365,15 +366,25 @@ ipcMain.handle('git:fechar-worktree', async (ev, cwd) => {
   } catch { return { erro: 'fora-de-repo' }; }
   if (topo === repo) return { erro: 'nao-e-worktree' }; // a pasta principal não se fecha
 
-  // Mudança sem commit iria pro lixo junto com a pasta: não fecha.
-  const mexido = await rodar('git', ['-C', topo, 'status', '--porcelain']).catch(() => 'x');
-  if (mexido.trim()) return { erro: 'mexido' };
+  // Mudança sem commit iria pro lixo junto com a pasta: não fecha. O que o
+  // git ignora (.env, node_modules, banco local) não trava o git, mas some
+  // junto com a pasta — por isso entra na lista da confirmação.
+  const situacao = await rodar('git', ['-C', topo, 'status', '--porcelain', '-z', '--ignored']).catch(() => null);
+  if (situacao === null) return { erro: 'mexido' };
+  const itens = situacao.split('\0').filter(Boolean);
+  if (itens.some((i) => !i.startsWith('!! '))) return { erro: 'mexido' };
+  const ignorados = itens.map((i) => i.slice(3));
+  const MOSTRAR = 10;
+  const somemJunto = ignorados.length
+    ? '\n\nSomem junto, porque o git ignora e não guarda:\n' + ignorados.slice(0, MOSTRAR).join('\n')
+      + (ignorados.length > MOSTRAR ? `\n…e mais ${ignorados.length - MOSTRAR}` : '')
+    : '';
 
   const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(ev.sender), {
     type: 'warning',
     title: 'Fechar worktree',
     message: `Fechar a worktree "${path.basename(topo)}"?`,
-    detail: `A pasta some do disco. A branch ${branch} continua existindo no repositório.`,
+    detail: `A pasta some do disco. A branch ${branch} continua existindo no repositório.${somemJunto}`,
     buttons: ['Fechar worktree', 'Cancelar'],
     defaultId: 1,
     cancelId: 1,
