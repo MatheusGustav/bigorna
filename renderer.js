@@ -2628,12 +2628,15 @@ async function salvar(forcado) {
   const alvo = arquivoAberto; // o arquivo pode trocar enquanto o disco grava
   try {
     const r = await window.api.writeFile(alvo, editor.getValue(), forcado ? null : mtimeAberto);
-    // Trocou de arquivo durante a gravação: o mtime que voltou é do antigo,
-    // e gravar ele em cima do novo dispararia "mudou por fora" à toa.
-    if (alvo !== arquivoAberto) return;
     // Alguém (git, Claude no terminal) mexeu no arquivo depois que a janela
-    // leu: gravar agora apagaria a mudança dele. Ctrl+S é quem decide.
+    // leu: gravar agora apagaria a mudança dele. Ctrl+S é quem decide. O
+    // aviso vale mesmo que já se tenha trocado de arquivo nesse meio tempo:
+    // a edição que ficou pra trás não foi gravada, e calar seria mentir.
     if (r.erro === 'mudou-por-fora') return avisar('o arquivo mudou por fora da Bigorna — Ctrl+S grava por cima');
+    if (r.erro) return avisar('não consegui salvar'); // recusa calada viraria "salvo" de mentira
+    // Trocou de arquivo durante a gravação: o mtime que voltou é do antigo,
+    // e gravar ele em cima do controle do novo confundiria o "mudou por fora".
+    if (alvo !== arquivoAberto) return;
     mtimeAberto = r.mtime ?? mtimeAberto;
     const agora = new Date();
     const hora = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
