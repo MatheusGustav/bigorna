@@ -27,6 +27,8 @@ function mudarLetra(nova) {
   nova = Math.max(6, Math.min(32, nova));
   if (nova === OPCOES_DO_TERMINAL.fontSize) return;
   OPCOES_DO_TERMINAL.fontSize = nova;
+  // no padrão o caderninho nem guarda; fora dele, volta na próxima abertura
+  guardarAjuste('letra', nova === LETRA_PADRAO ? undefined : nova);
   for (const [id, t] of terminais) {
     t.term.options.fontSize = nova;
     if (t.col.ativo === id) {
@@ -1353,6 +1355,8 @@ $('btn-lateral').addEventListener('click', () => {
 $('btn-ocultos').addEventListener('click', () => {
   const sem = $('lateral').classList.toggle('sem-ocultos');
   $('btn-ocultos').classList.toggle('riscado', sem);
+  guardarAjuste('ocultos', sem || undefined); // escondido fica guardado
+  if ($('filtro').value) aplicarFiltro(); // a conta do filtro muda junto
 });
 
 // ---------- filtro no pé da lateral ----------
@@ -2792,6 +2796,11 @@ $('divisor').addEventListener('dblclick', () => {
   ajustes = await window.api.lerAjustes().catch(() => ({})) || {};
   if (ajustes.larguraDaLateral) $('lateral').style.setProperty('--largura', ajustes.larguraDaLateral + 'px');
   if (ajustes.larguraDoArquivo) $('editor-area').style.width = ajustes.larguraDoArquivo + 'px';
+  if (ajustes.letra) OPCOES_DO_TERMINAL.fontSize = Math.max(6, Math.min(32, ajustes.letra));
+  if (ajustes.ocultos) {
+    $('lateral').classList.add('sem-ocultos');
+    $('btn-ocultos').classList.add('riscado');
+  }
 
   pastaPedida = await window.api.pastaPedida();
   const arquivo = await window.api.arquivoPedido();
