@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // worktree a partir da aba do terminal
   abrirWorktree: (cwd) => ipcRenderer.invoke('git:worktree', cwd),
+  fecharWorktree: (cwd) => ipcRenderer.invoke('git:fechar-worktree', cwd),
   iconesDaAba: () => ipcRenderer.invoke('menu:icones-da-aba'),
 
   // arquivos

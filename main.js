@@ -349,6 +349,48 @@ ipcMain.handle('git:worktree', async (_ev, cwd) => {
   return { caminho: destino, branch, volta };
 });
 
+// O caminho de volta: a worktree fecha e a pasta dela some do disco. A
+// branch continua existindo no repositório — o que morre é só a casa
+// emprestada. Só fecha com tudo commitado, e com confirmação na tela.
+ipcMain.handle('git:fechar-worktree', async (ev, cwd) => {
+  if (!cwd || !path.isAbsolute(cwd)) return { erro: 'pasta' };
+  let repo, topo, branch;
+  try {
+    const saida = await rodar('git', ['-C', cwd, 'rev-parse', '--path-format=absolute',
+      '--git-common-dir', '--show-toplevel', '--abbrev-ref', 'HEAD']);
+    const [comum, t, atual] = saida.trim().split('\n');
+    repo = path.dirname(comum);
+    topo = t;
+    branch = atual;
+  } catch { return { erro: 'fora-de-repo' }; }
+  if (topo === repo) return { erro: 'nao-e-worktree' }; // a pasta principal não se fecha
+
+  // Mudança sem commit iria pro lixo junto com a pasta: não fecha.
+  const mexido = await rodar('git', ['-C', topo, 'status', '--porcelain']).catch(() => 'x');
+  if (mexido.trim()) return { erro: 'mexido' };
+
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(ev.sender), {
+    type: 'warning',
+    title: 'Fechar worktree',
+    message: `Fechar a worktree "${path.basename(topo)}"?`,
+    detail: `A pasta some do disco. A branch ${branch} continua existindo no repositório.`,
+    buttons: ['Fechar worktree', 'Cancelar'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response !== 0) return { cancelado: true };
+
+  try {
+    await rodar('git', ['-C', repo, 'worktree', 'remove', topo]);
+  } catch (erro) {
+    console.error('[worktree] não fechou:', erro.message);
+    return { erro: 'git' };
+  }
+  console.log('[worktree]', topo, 'fechada; a branch', branch, 'ficou no repositório');
+  return { ok: true, pasta: topo };
+});
+
 // bigorna-feat, e se já existir, bigorna-feat-2, bigorna-feat-3…
 async function caminhoLivre(caminho) {
   let tentativa = caminho;
@@ -667,6 +709,7 @@ ipcMain.handle('menu:opcoes', async (_ev, caminho, ehPasta) => {
 // Ícones do menu do botão direito na aba do terminal.
 const ICONES_DA_ABA = {
   worktree: 'folder-new',
+  fecharWorktree: 'user-trash',
   renomear: 'edit-rename',
   fechar: 'tab-close',
   lado: 'view-split-left-right',
