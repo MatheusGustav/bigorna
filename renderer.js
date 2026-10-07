@@ -656,8 +656,9 @@ async function criarTerminal(pasta, col) {
   });
 
   // Nenhum atalho próprio: tudo vai pro bash. As únicas exceções são as
-  // mesmas do Konsole: Ctrl+Shift+C copia, Ctrl+Shift+V cola e
-  // Ctrl+Shift+F abre a busca.
+  // mesmas do Konsole: Ctrl+Shift+C copia, Ctrl+Shift+V cola, Ctrl+Shift+F
+  // abre a busca, Ctrl+Shift+T abre outro terminal na coluna e
+  // Ctrl+Shift+K limpa o rolo da tela.
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true;
     if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') {
@@ -673,6 +674,16 @@ async function criarTerminal(pasta, col) {
     }
     if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyF') {
       abrirBusca(id);
+      ev.preventDefault();
+      return false;
+    }
+    if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyT') {
+      criarTerminal(undefined, terminais.get(id)?.col);
+      ev.preventDefault();
+      return false;
+    }
+    if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyK') {
+      term.clear();
       ev.preventDefault();
       return false;
     }
