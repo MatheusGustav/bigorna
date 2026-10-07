@@ -44,6 +44,10 @@ contextBridge.exposeInMainWorld('api', {
   excluir: (caminho) => ipcRenderer.invoke('fs:delete', caminho),
   compactar: (caminho) => ipcRenderer.invoke('fs:zip', caminho),
 
+  // ajustes guardados entre aberturas (largura da lateral e companhia)
+  lerAjustes: () => ipcRenderer.invoke('ajustes:ler'),
+  gravarAjustes: (ajustes) => ipcRenderer.send('ajustes:gravar', ajustes),
+
   // jogos
   coreDoJogo: (core) => ipcRenderer.invoke('jogo:core', core),
   lerBytes: (arquivo) => ipcRenderer.invoke('fs:bytes', arquivo),

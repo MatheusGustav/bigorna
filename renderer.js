@@ -2668,6 +2668,22 @@ window.addEventListener('keydown', (ev) => {
 }, true); // "true": a janela ouve a tecla antes do terminal e do editor
 
 // ============================================================
+// AJUSTES GUARDADOS: o que sobrevive entre aberturas
+// ============================================================
+// O caderninho (ajustes.json na pasta de configuração) guarda por ora as
+// larguras da lateral e do arquivo. A espera curta junta uma sequência de
+// mudanças numa gravação só.
+
+let ajustes = {};
+let gravarAjustesAgendado = null;
+function guardarAjuste(chave, valor) {
+  if (valor === undefined) delete ajustes[chave];
+  else ajustes[chave] = valor;
+  clearTimeout(gravarAjustesAgendado);
+  gravarAjustesAgendado = setTimeout(() => window.api.gravarAjustes(ajustes), 400);
+}
+
+// ============================================================
 // DIVISOR da lateral (largura das pastas)
 // ============================================================
 
@@ -2686,13 +2702,17 @@ $('divisor-lateral').addEventListener('mousedown', (evInicio) => {
     lateral.classList.remove('arrastando');
     window.removeEventListener('mousemove', mover);
     window.removeEventListener('mouseup', soltar);
+    guardarAjuste('larguraDaLateral', Math.round(lateral.getBoundingClientRect().width));
   }
   window.addEventListener('mousemove', mover);
   window.addEventListener('mouseup', soltar);
 });
 
-// Duplo clique devolve a largura de partida.
-$('divisor-lateral').addEventListener('dblclick', () => $('lateral').style.setProperty('--largura', '240px'));
+// Duplo clique devolve a largura de partida (e limpa o ajuste guardado).
+$('divisor-lateral').addEventListener('dblclick', () => {
+  $('lateral').style.setProperty('--largura', '240px');
+  guardarAjuste('larguraDaLateral', undefined);
+});
 
 // ============================================================
 // DIVISOR entre o arquivo e o terminal (largura do arquivo)
@@ -2711,19 +2731,28 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
   function soltar() {
     window.removeEventListener('mousemove', mover);
     window.removeEventListener('mouseup', soltar);
+    guardarAjuste('larguraDoArquivo', Math.round(area.getBoundingClientRect().width));
   }
   window.addEventListener('mousemove', mover);
   window.addEventListener('mouseup', soltar);
 });
 
-// Duplo clique devolve o meio a meio.
-$('divisor').addEventListener('dblclick', () => { $('editor-area').style.width = ''; });
+// Duplo clique devolve o meio a meio (e limpa o ajuste guardado).
+$('divisor').addEventListener('dblclick', () => {
+  $('editor-area').style.width = '';
+  guardarAjuste('larguraDoArquivo', undefined);
+});
 
 // ============================================================
 // PARTIDA
 // ============================================================
 
 (async () => {
+  // o caderninho de ajustes entra antes de tudo, pra tela já nascer no jeito
+  ajustes = await window.api.lerAjustes().catch(() => ({})) || {};
+  if (ajustes.larguraDaLateral) $('lateral').style.setProperty('--largura', ajustes.larguraDaLateral + 'px');
+  if (ajustes.larguraDoArquivo) $('editor-area').style.width = ajustes.larguraDoArquivo + 'px';
+
   pastaPedida = await window.api.pastaPedida();
   const arquivo = await window.api.arquivoPedido();
   // A Bigorna abre só com o terminal; a lateral fica pro botão do trilho
