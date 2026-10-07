@@ -923,7 +923,8 @@ function desenharAbas() {
       const etiqueta = document.createElement('span');
       etiqueta.className = 'etiqueta';
       etiqueta.textContent = terminais.get(ids[0]).info.nome;
-      etiqueta.title = repo;
+      etiqueta.title = repo + ' — clique pra mostrar na lateral';
+      etiqueta.addEventListener('click', () => revelarRepositorio(repo));
       grupo.appendChild(etiqueta);
       for (const id of ids) grupo.appendChild(abaDoTerminal(id));
       novas.appendChild(grupo);
@@ -934,6 +935,15 @@ function desenharAbas() {
   }
   arrumarFliperama(); // em pé ou deitado, conforme a coluna dele tenha terminal
   atualizarFora(); // o terminal da vez pode ter mudado de pasta, ou outro virou a vez
+}
+
+// Clicar na etiqueta do grupo abre a lateral e desce até a pasta do
+// repositório — o atalho pra achar os arquivos do que está rodando ali.
+async function revelarRepositorio(repo) {
+  if (!dentroDe(repo, casa)) return avisar('esse repositório está fora da casa');
+  $('lateral').classList.remove('fechada');
+  atualizarTrilho();
+  await revelarPasta(repo, casa, $('arvore'));
 }
 
 // ============================================================

@@ -479,7 +479,9 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   font-size: 12px;
   color: var(--cor);
   white-space: nowrap;
+  cursor: pointer; /* clicar desce a lateral até a pasta do repositório */
 }
+.etiqueta:hover { filter: brightness(1.35); }
 .aba {
   display: flex;
   align-items: center;
