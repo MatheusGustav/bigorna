@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   raizDeFora: (pasta) => ipcRenderer.invoke('fs:raiz-de-fora', pasta),
   temaDeIcones: () => ipcRenderer.invoke('icones:tema'),
   listDir: (dir) => ipcRenderer.invoke('fs:list', dir),
+  existe: (caminho) => ipcRenderer.invoke('fs:existe', caminho),
   readFile: (arquivo) => ipcRenderer.invoke('fs:read', arquivo),
   writeFile: (arquivo, conteudo, mtimeConhecido) => ipcRenderer.invoke('fs:write', arquivo, conteudo, mtimeConhecido),
   vigiarPasta: (dir) => ipcRenderer.invoke('fs:watch', dir),

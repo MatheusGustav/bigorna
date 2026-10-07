@@ -492,6 +492,15 @@ ipcMain.on('fs:unwatch', (_ev, dir) => {
   vigias.delete(dir);
 });
 
+// A tela pergunta se um caminho existe (pros links do terminal): responde
+// se existe, se é pasta e o caminho limpo (sem ".." no meio), sem abrir nada.
+ipcMain.handle('fs:existe', async (_ev, caminho) => {
+  if (typeof caminho !== 'string' || !path.isAbsolute(caminho)) return { existe: false };
+  const limpo = path.normalize(caminho);
+  const info = await fs.stat(limpo).catch(() => null);
+  return { existe: !!info, pasta: !!info && info.isDirectory(), caminho: limpo };
+});
+
 ipcMain.handle('fs:read', async (_ev, arquivo) => {
   const info = await fs.stat(arquivo);
   if (info.size > 2 * 1024 * 1024) return { erro: 'grande' };
