@@ -1224,6 +1224,13 @@ const ERRO_DA_WORKTREE = {
   mexido: 'tem arquivo mexido sem commit; a branch não pode mudar de casa',
 };
 
+const ERRO_DO_FECHAR = {
+  'fora-de-repo': 'essa aba não está num repositório git',
+  'nao-e-worktree': 'essa aba está na pasta principal, não numa worktree',
+  mexido: 'tem arquivo mexido sem commit; a worktree não fecha',
+  git: 'o git recusou fechar essa worktree',
+};
+
 let iconesDaAba = null; // vêm do sistema uma vez só
 
 // A pasta principal do repositório mora na main (ou na master): worktree
@@ -1252,6 +1259,11 @@ function itensDaAba(id) {
     branch && !BRANCHES_DA_PRINCIPAL.includes(branch)
       ? { texto: `Abrir worktree de ${branch}`, icone: ic.worktree, acao: () => abrirWorktree(id) }
       : { texto: 'Abrir worktree', icone: ic.worktree, desligado: true },
+    // o caminho de volta, só pra quem está numa worktree: a pasta dela some
+    // (com confirmação e tudo commitado), a branch fica no repositório
+    t.info && t.info.repo && t.info.cwd && !dentroDe(t.info.cwd, t.info.repo)
+      ? { texto: 'Fechar worktree (apaga a pasta)…', icone: ic.fecharWorktree, acao: () => fecharWorktree(id) }
+      : { texto: 'Fechar worktree', icone: ic.fecharWorktree, desligado: true },
     '-',
     { texto: 'Renomear aba…', icone: ic.renomear, acao: () => renomearAba(id) },
     { texto: 'Fechar terminal', icone: ic.fechar, acao: () => fecharTerminal(id) },
@@ -1281,6 +1293,21 @@ async function abrirWorktree(id) {
   if (r.erro) return avisar(ERRO_DA_WORKTREE[r.erro] || 'não consegui abrir a worktree');
   await criarTerminal(r.caminho, t.col); // na mesma coluna da aba de origem
   atualizarInfo(id); // a aba de origem já está em outra branch
+}
+
+// Fecha a worktree da aba: a pasta some do disco (o processo principal
+// confirma na tela e só aceita com tudo commitado), a branch continua no
+// repositório, e os terminais que moravam na pasta fecham junto.
+async function fecharWorktree(id) {
+  const t = terminais.get(id);
+  if (!t || !t.info || !t.info.cwd) return;
+  const r = await window.api.fecharWorktree(t.info.cwd).catch(() => ({ erro: 'git' }));
+  if (r.cancelado) return;
+  if (r.erro) return avisar(ERRO_DO_FECHAR[r.erro] || 'não consegui fechar a worktree');
+  for (const [outro, o] of [...terminais]) {
+    if (o.info && dentroDe(o.info.cwd, r.pasta)) fecharTerminal(outro);
+  }
+  avisar('worktree fechada; a branch continua no repositório');
 }
 
 // Nome escolhido na mão, igual ao renomear da lateral. Apagar tudo e dar Enter
