@@ -1578,14 +1578,23 @@ function salvarAgora() {
   if (salvarAgendado) salvar();
 }
 
-// Aviso curto no canto de baixo da janela, por cima do que estiver na tela.
-let avisoAgendado = null;
+// Avisos curtos no canto de baixo da janela, empilhados: um não atropela
+// o outro quando chegam dois seguidos. O mesmo texto de novo só renova o
+// tempo do que já está na tela, e passando de 4 o mais velho sai.
 function avisar(texto) {
-  const el = $('aviso');
+  const pilha = $('avisos');
+  const ultimo = pilha.lastElementChild;
+  if (ultimo && ultimo.textContent === texto) {
+    clearTimeout(ultimo.espera);
+    ultimo.espera = setTimeout(() => ultimo.remove(), 3000);
+    return;
+  }
+  const el = document.createElement('div');
+  el.className = 'aviso';
   el.textContent = texto;
-  el.hidden = false;
-  clearTimeout(avisoAgendado);
-  avisoAgendado = setTimeout(() => { el.hidden = true; }, 3000);
+  pilha.appendChild(el);
+  while (pilha.childElementCount > 4) pilha.firstElementChild.remove();
+  el.espera = setTimeout(() => el.remove(), 3000);
 }
 
 // Quebrou por dentro: aparece no aviso em vez de morrer calado no console

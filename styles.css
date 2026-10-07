@@ -142,7 +142,7 @@ button { font: inherit; }
 }
 .ferramenta:hover::after { display: block; }
 #trilho .espaco { flex: 1; }
-/* quantos Claudes estão rodando, somados de todas as abas */
+/* o selo: a estrela de 7 pontas no pé do trilho, só enfeite */
 #selo {
   width: 28px;
   height: 28px;
@@ -559,13 +559,21 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   font-weight: 600;
 }
 
-/* ---------- aviso curto no canto de baixo ---------- */
-#aviso {
+/* ---------- avisos curtos, empilhados no canto de baixo ---------- */
+#avisos {
   position: fixed;
   right: 14px;
   bottom: 14px;
   z-index: 90;
   max-width: 60%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+.aviso {
+  max-width: 100%;
   padding: 6px 10px;
   font-size: 11px;
   color: var(--texto);
@@ -576,7 +584,6 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  pointer-events: none;
 }
 
 /* ---------- menu do botão direito (no estilo do menu do Dolphin) ---------- */
