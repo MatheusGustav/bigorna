@@ -32,6 +32,7 @@ Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico
 - **Ordem na lateral**: pastas primeiro, por nome; arquivos por ordem de chegada, o mais novo no fim — baixou agora, está no pé da pasta (decisão do Matheus). Chegada é a criação do arquivo, não a última mexida: editar não muda ninguém de lugar.
 - **Arrastar da lateral**: o item vai como arquivo de verdade, pelo arrasto nativo do sistema — solta no WhatsApp, no navegador, no Dolphin, em qualquer programa. Soltar num terminal da Bigorna (até arquivo vindo de fora) cola o caminho no prompt, entre aspas quando precisa, igual ao Konsole.
 - Botão direito na lateral: menu no estilo do Dolphin (abrir com, renomear, lixeira, zip, transcrever áudio…).
+- **Filtro** no pé da lateral: digitar esconde o que não casa com o texto, nas duas metades. Pasta aberta fica se algum filho casar; pasta fechada só pelo nome (o filtro não vasculha o disco). Esc limpa.
 
 ## Avisos
 

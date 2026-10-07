@@ -217,6 +217,21 @@ button { font: inherit; }
 .filhos { display: none; }
 .filhos.expandida { display: block; }
 
+/* o filtro no pé da lateral; o que não casa some, com os filhos junto */
+#filtro {
+  flex: none;
+  margin: 6px;
+  padding: 3px 6px;
+  font: inherit;
+  color: var(--texto);
+  background: var(--fundo-2);
+  border: 1px solid var(--borda);
+  outline: none;
+}
+#filtro:focus { border-color: #555; }
+#filtro::placeholder { color: #4e4e4e; }
+.item.fora-do-filtro, .item.fora-do-filtro + .filhos { display: none; }
+
 /* ---------- a peça do arquivo: editor, visor ou mesa de jogo ---------- */
 #editor-area {
   width: 50%;            /* o divisor muda */

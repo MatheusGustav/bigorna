@@ -919,6 +919,7 @@ async function montarPasta(dir, recipiente, nivel) {
   // Troca tudo de uma vez: relendo uma pasta, a lista não pisca vazia.
   recipiente.replaceChildren(novas);
   for (const linha of reabrir) await alternarPasta(linha, true);
+  if ($('filtro').value) aplicarFiltro(); // a lista nova entra já filtrada
 }
 
 async function alternarPasta(linha, abrir) {
@@ -1041,6 +1042,41 @@ async function recarregarPasta(dir) {
 $('btn-lateral').addEventListener('click', () => {
   $('lateral').classList.toggle('fechada');
   atualizarTrilho();
+});
+
+// ---------- filtro no pé da lateral ----------
+// Digitar esconde o que não casa com o texto, nas duas metades. Pasta
+// aberta fica à mostra se algum filho casar; pasta fechada só pelo nome
+// (ninguém vasculha o disco por causa do filtro). Esc limpa.
+
+function aplicarFiltro() {
+  const texto = $('filtro').value.trim().toLowerCase();
+  filtrarRecipiente($('arvore'), texto);
+  filtrarRecipiente($('arvore-fora'), texto);
+}
+
+// responde se algo ficou à mostra dentro do recipiente
+function filtrarRecipiente(recipiente, texto) {
+  let algum = false;
+  for (const el of recipiente.children) {
+    if (!el.dados) continue; // as caixas de filhos são tratadas pelo item delas
+    let mostra = !texto || el.dados.nome.toLowerCase().includes(texto);
+    if (el.dados.ehPasta && el.dados.filhos && texto) {
+      mostra = filtrarRecipiente(el.dados.filhos, texto) || mostra;
+    } else if (el.dados.ehPasta && el.dados.filhos && !texto) {
+      filtrarRecipiente(el.dados.filhos, texto); // limpar também desce
+    }
+    el.classList.toggle('fora-do-filtro', !mostra);
+    algum = algum || mostra;
+  }
+  return algum;
+}
+
+$('filtro').addEventListener('input', aplicarFiltro);
+$('filtro').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape') return;
+  $('filtro').value = '';
+  aplicarFiltro();
 });
 
 // ============================================================
