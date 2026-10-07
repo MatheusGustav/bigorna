@@ -1352,7 +1352,7 @@ $('btn-lateral').addEventListener('click', () => {
 
 // O botão "ocultos" na linha das pastas esconde e mostra os arquivos de
 // ponto, nas duas metades da lateral. Só a tela muda (a lista continua
-// inteira por baixo), e o estado vale pra sessão: abrir de novo mostra.
+// inteira por baixo), e o escondido fica no caderninho de ajustes.
 $('btn-ocultos').addEventListener('click', () => {
   const sem = $('lateral').classList.toggle('sem-ocultos');
   $('btn-ocultos').classList.toggle('riscado', sem);
@@ -2715,9 +2715,9 @@ window.addEventListener('keydown', (ev) => {
 // ============================================================
 // AJUSTES GUARDADOS: o que sobrevive entre aberturas
 // ============================================================
-// O caderninho (ajustes.json na pasta de configuração) guarda por ora as
-// larguras da lateral e do arquivo. A espera curta junta uma sequência de
-// mudanças numa gravação só.
+// O caderninho (ajustes.json na pasta de configuração) guarda as larguras
+// da lateral e do arquivo, a letra e os ocultos. A espera curta junta uma
+// sequência de mudanças numa gravação só.
 
 let ajustes = {};
 let gravarAjustesAgendado = null;
