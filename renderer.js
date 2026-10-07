@@ -603,19 +603,33 @@ async function criarTerminal(pasta, col) {
     console.warn('[terminal] sem WebGL, usando o desenho comum:', erro);
   }
 
-  // Caminho de arquivo escrito na tela (começando com / ou ~) vira link:
-  // passando o mouse ele se sublinha, e Ctrl+clique abre no editor, com a
-  // lateral descendo até ele. Um :12 no fim (do jeito que o Claude Code
-  // imprime) já leva o cursor pra linha. O (?<![\w:/]) impede que o meio
-  // de um https://x ou de outro caminho seja lido como caminho novo.
+  // Caminho escrito na tela vira link — mas só o que existe de verdade no
+  // disco se sublinha (a conferência é por linha, só na que o mouse está).
+  // Vale caminho absoluto, ~ e relativo, resolvido pela pasta da aba.
+  // Ctrl+clique abre: arquivo no editor ou visor, pasta descendo a lateral.
+  // Um :12 no fim (do jeito que o Claude Code imprime) leva o cursor pra
+  // linha. As espiadas pra trás impedem que o meio de um https://x, de um
+  // e-mail ou de outro caminho seja lido como caminho novo.
   const CAMINHO_NA_TELA = /(?<![\w:/])(?:~|\/)[\w.+@%\-/:]+/g;
+  const CAMINHO_RELATIVO = /(?<![\w:/.~@-])(?:\.\.?\/)?[\w.+@%-]+(?:\/[\w.+@%-]+)+(?::\d+(?::\d+)?)?/g;
   term.registerLinkProvider({
     provideLinks(numeroDaLinha, entregar) {
       const linhaDaTela = term.buffer.active.getLine(numeroDaLinha - 1);
       if (!linhaDaTela) return entregar(undefined);
       const texto = linhaDaTela.translateToString(true);
-      const links = [];
-      for (const achado of texto.matchAll(CAMINHO_NA_TELA)) {
+
+      const candidatos = [];
+      for (const achado of texto.matchAll(CAMINHO_NA_TELA)) candidatos.push({ achado, absoluto: true });
+      for (const achado of texto.matchAll(CAMINHO_RELATIVO)) {
+        const inicio = achado.index;
+        const fim = inicio + achado[0].length;
+        const dentroDeOutro = candidatos.some(({ achado: a }) =>
+          inicio < a.index + a[0].length && fim > a.index);
+        if (!dentroDeOutro) candidatos.push({ achado, absoluto: false });
+      }
+
+      const cwd = terminais.get(id)?.info?.cwd;
+      const promessas = candidatos.slice(0, 8).map(async ({ achado, absoluto }) => {
         let caminho = achado[0].replace(/[.,;:]+$/, ''); // pontuação de frase não é do caminho
         let linhaDoCursor = null;
         const comLinha = caminho.match(/:(\d+)(?::\d+)?$/); // :linha ou :linha:coluna
@@ -623,18 +637,27 @@ async function criarTerminal(pasta, col) {
           linhaDoCursor = Number(comLinha[1]);
           caminho = caminho.slice(0, comLinha.index);
         }
-        if (caminho.includes(':') || !caminho.includes('/') || caminho.length < 3) continue;
+        if (caminho.includes(':') || !caminho.includes('/') || caminho.length < 3) return null;
         if (caminho.startsWith('~')) caminho = casa + caminho.slice(1);
-        links.push({
+        else if (!absoluto) {
+          if (!cwd) return null;
+          caminho = cwd + '/' + caminho;
+        }
+        const r = await window.api.existe(caminho).catch(() => ({ existe: false }));
+        if (!r.existe) return null; // o que não existe não se sublinha
+        return {
           range: {
             start: { x: achado.index + 1, y: numeroDaLinha },
             end: { x: achado.index + achado[0].length, y: numeroDaLinha },
           },
           text: achado[0],
-          activate: (ev) => { if (ev.ctrlKey) abrirCaminhoDaTela(caminho, linhaDoCursor); },
-        });
-      }
-      entregar(links.length ? links : undefined);
+          activate: (ev) => { if (ev.ctrlKey) abrirCaminhoDaTela(r.caminho, linhaDoCursor, r.pasta); },
+        };
+      });
+      Promise.all(promessas).then((links) => {
+        const vivos = links.filter(Boolean);
+        entregar(vivos.length ? vivos : undefined);
+      });
     },
   });
 
@@ -845,10 +868,16 @@ function desenharAbas() {
   atualizarFora(); // o terminal da vez pode ter mudado de pasta, ou outro virou a vez
 }
 
-// O Ctrl+clique num caminho impresso no terminal: abre como se tivesse
-// sido pedido de fora (editor ou visor, lateral descendo junto) e, se
-// veio com :linha, o cursor já cai nela.
-async function abrirCaminhoDaTela(caminho, linha) {
+// O Ctrl+clique num caminho impresso no terminal: pasta desce a lateral
+// até ela; arquivo abre como se tivesse sido pedido de fora (editor ou
+// visor, lateral descendo junto) e, se veio com :linha, o cursor cai nela.
+async function abrirCaminhoDaTela(caminho, linha, ehPasta) {
+  if (ehPasta) {
+    if (!dentroDe(caminho, casa)) return avisar('essa pasta está fora da casa');
+    $('lateral').classList.remove('fechada');
+    atualizarTrilho();
+    return revelarPasta(caminho, casa, $('arvore'));
+  }
   await abrirPedido(caminho);
   if (linha && caminho === arquivoAberto && editor && editor.getModel()) {
     const alvo = Math.min(linha, editor.getModel().getLineCount());
