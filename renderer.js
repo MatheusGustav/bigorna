@@ -1236,6 +1236,12 @@ async function alternarPasta(linha, abrir) {
 // Abre a árvore, pasta por pasta, de `raiz` até `alvo`, e rola até ele aparecer.
 async function revelarPasta(alvo, raiz, recipiente) {
   if (!alvo || alvo === raiz || !alvo.startsWith(raiz.replace(/\/$/, '') + '/')) return;
+  // Revelar com o filtro ativo desceria até um item escondido: o filtro
+  // limpa antes, senão a lateral abre "vazia" apontando pro invisível.
+  if ($('filtro').value) {
+    $('filtro').value = '';
+    aplicarFiltro();
+  }
   let linha = null;
   let caminho = raiz.replace(/\/$/, '');
   for (const nome of alvo.slice(caminho.length + 1).split('/')) {
@@ -1362,11 +1368,15 @@ function aplicarFiltro() {
 
 // responde se algo ficou à mostra dentro do recipiente
 function filtrarRecipiente(recipiente, texto) {
+  // o que o botão "ocultos" escondeu não conta: um pai não pode ficar à
+  // mostra por causa de um filho de ponto que o usuário mandou esconder
+  const semOcultos = $('lateral').classList.contains('sem-ocultos');
   let algum = false;
   for (const el of recipiente.children) {
     if (!el.dados) continue; // as caixas de filhos são tratadas pelo item delas
-    let mostra = !texto || el.dados.nome.toLowerCase().includes(texto);
-    if (el.dados.ehPasta && el.dados.filhos && texto) {
+    const escondido = semOcultos && el.classList.contains('oculto');
+    let mostra = !escondido && (!texto || el.dados.nome.toLowerCase().includes(texto));
+    if (!escondido && el.dados.ehPasta && el.dados.filhos && texto) {
       mostra = filtrarRecipiente(el.dados.filhos, texto) || mostra;
     } else if (el.dados.ehPasta && el.dados.filhos && !texto) {
       filtrarRecipiente(el.dados.filhos, texto); // limpar também desce
