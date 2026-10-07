@@ -1,4 +1,4 @@
-/* global Terminal, FitAddon, WebglAddon, require, monaco */
+/* global Terminal, FitAddon, WebglAddon, WebLinksAddon, SearchAddon, require, monaco */
 
 const $ = (id) => document.getElementById(id);
 
@@ -9,6 +9,7 @@ const $ = (id) => document.getElementById(id);
 const OPCOES_DO_TERMINAL = {
   fontFamily: '"JetBrains Mono", monospace',
   fontSize: 14,
+  allowProposedApi: true, // as marcas da busca usam a API "proposta" do xterm
   cursorBlink: true,
   scrollback: 10000,
   theme: {
@@ -18,6 +19,25 @@ const OPCOES_DO_TERMINAL = {
     selectionBackground: '#3a3a3a',
   },
 };
+
+// Tamanho da letra de todos os terminais de uma vez: Ctrl+= aumenta,
+// Ctrl+− diminui, Ctrl+0 volta pro padrão, e Ctrl+rodinha também vale —
+// os mesmos do Konsole. Os escondidos se acertam ao serem mostrados.
+const LETRA_PADRAO = OPCOES_DO_TERMINAL.fontSize;
+function mudarLetra(nova) {
+  nova = Math.max(6, Math.min(32, nova));
+  if (nova === OPCOES_DO_TERMINAL.fontSize) return;
+  OPCOES_DO_TERMINAL.fontSize = nova;
+  // no padrão o caderninho nem guarda; fora dele, volta na próxima abertura
+  guardarAjuste('letra', nova === LETRA_PADRAO ? undefined : nova);
+  for (const [id, t] of terminais) {
+    t.term.options.fontSize = nova;
+    if (t.col.ativo === id) {
+      t.fit.fit();
+      window.api.ptyResize(id, t.term.cols, t.term.rows);
+    }
+  }
+}
 
 // Cores das etiquetas de grupo. Cada repositório pega a próxima da fila e
 // fica com ela; acabando as cores, a fila recomeça. Verde, amarelo e vermelho
@@ -129,6 +149,22 @@ function criarColunaEm(linha, indice) {
     col.el.classList.add('arrastando');
   });
   abas.addEventListener('dragend', () => limparArrasto());
+
+  // Costumes do Konsole com o mouse: a rodinha na barra passa pelas abas da
+  // coluna (dando a volta no fim), e duplo clique na parte vazia abre outro
+  // terminal ali, como o + faria.
+  abas.addEventListener('wheel', (ev) => {
+    const ids = idsDaColuna(col);
+    if (ids.length < 2) return;
+    ev.preventDefault();
+    const passo = (ev.deltaY || ev.deltaX) > 0 ? 1 : -1;
+    const atual = ids.indexOf(col.ativo);
+    ativarTerminal(ids[(atual + passo + ids.length) % ids.length]);
+  });
+  abas.addEventListener('dblclick', (ev) => {
+    if (ev.target === abas || ev.target === col.listaEl) criarTerminal(undefined, col);
+  });
+
   col.terminaisEl = document.createElement('div');
   col.terminaisEl.className = 'terminais';
   col.el.append(abas, col.terminaisEl);
@@ -572,6 +608,11 @@ async function criarTerminal(pasta, col) {
   $('shell-fim').hidden = true;
   if (!col || !linhaDe(col)) col = (colunaAtiva && linhaDe(colunaAtiva) && colunaAtiva) || todasAsColunas()[0] || criarColuna();
 
+  // Sem pasta pedida (+, duplo clique na barra), a aba nova nasce na pasta
+  // do terminal à mostra na coluna — igual ao Konsole, que segue a pasta
+  // atual. Sem nenhum terminal aberto, vale a casa (ou o pedido de fora).
+  if (pasta === undefined) pasta = terminais.get(col.ativo)?.info?.cwd ?? terminalDaVez()?.info?.cwd;
+
   const id = proximoTerminal++;
   const caixa = document.createElement('div');
   caixa.className = 'terminal-caixa';
@@ -603,8 +644,87 @@ async function criarTerminal(pasta, col) {
     console.warn('[terminal] sem WebGL, usando o desenho comum:', erro);
   }
 
-  // Nenhum atalho próprio: tudo vai pro bash. As duas únicas exceções são as
-  // mesmas do Konsole: Ctrl+Shift+C copia e Ctrl+Shift+V cola.
+  // Endereço escrito na tela vira link: passando o mouse ele se sublinha, e
+  // Ctrl+clique abre no navegador. Clique simples continua sendo só clique,
+  // senão selecionar texto perto de um link abriria página sem querer.
+  term.loadAddon(new WebLinksAddon.WebLinksAddon((ev, url) => {
+    if (ev.ctrlKey) window.api.abrirLink(url);
+  }));
+
+  // A busca (Ctrl+Shift+F) é de cada terminal: cada um guarda o seu texto
+  // marcado. O contador da caixinha só obedece ao dono da busca aberta.
+  const busca = new SearchAddon.SearchAddon();
+  term.loadAddon(busca);
+  busca.onDidChangeResults(({ resultIndex, resultCount }) => {
+    if (buscaNo !== id) return;
+    $('busca-conta').textContent =
+      resultCount < 0 ? 'muitas' :
+      resultCount === 0 ? 'nada' :
+      resultIndex < 0 ? String(resultCount) : `${resultIndex + 1}/${resultCount}`;
+  });
+
+  // Caminho escrito na tela vira link — mas só o que existe de verdade no
+  // disco se sublinha (a conferência é por linha, só na que o mouse está).
+  // Vale caminho absoluto, ~ e relativo, resolvido pela pasta da aba.
+  // Ctrl+clique abre: arquivo no editor ou visor, pasta descendo a lateral.
+  // Um :12 no fim (do jeito que o Claude Code imprime) leva o cursor pra
+  // linha. As espiadas pra trás impedem que o meio de um https://x, de um
+  // e-mail ou de outro caminho seja lido como caminho novo.
+  const CAMINHO_NA_TELA = /(?<![\w:/])(?:~|\/)[\w.+@%\-/:]+/g;
+  const CAMINHO_RELATIVO = /(?<![\w:/.~@-])(?:\.\.?\/)?[\w.+@%-]+(?:\/[\w.+@%-]+)+(?::\d+(?::\d+)?)?/g;
+  term.registerLinkProvider({
+    provideLinks(numeroDaLinha, entregar) {
+      const linhaDaTela = term.buffer.active.getLine(numeroDaLinha - 1);
+      if (!linhaDaTela) return entregar(undefined);
+      const texto = linhaDaTela.translateToString(true);
+
+      const candidatos = [];
+      for (const achado of texto.matchAll(CAMINHO_NA_TELA)) candidatos.push({ achado, absoluto: true });
+      for (const achado of texto.matchAll(CAMINHO_RELATIVO)) {
+        const inicio = achado.index;
+        const fim = inicio + achado[0].length;
+        const dentroDeOutro = candidatos.some(({ achado: a }) =>
+          inicio < a.index + a[0].length && fim > a.index);
+        if (!dentroDeOutro) candidatos.push({ achado, absoluto: false });
+      }
+
+      const cwd = terminais.get(id)?.info?.cwd;
+      const promessas = candidatos.slice(0, 8).map(async ({ achado, absoluto }) => {
+        let caminho = achado[0].replace(/[.,;:]+$/, ''); // pontuação de frase não é do caminho
+        let linhaDoCursor = null;
+        const comLinha = caminho.match(/:(\d+)(?::\d+)?$/); // :linha ou :linha:coluna
+        if (comLinha) {
+          linhaDoCursor = Number(comLinha[1]);
+          caminho = caminho.slice(0, comLinha.index);
+        }
+        if (caminho.includes(':') || !caminho.includes('/') || caminho.length < 3) return null;
+        if (caminho.startsWith('~')) caminho = casa + caminho.slice(1);
+        else if (!absoluto) {
+          if (!cwd) return null;
+          caminho = cwd + '/' + caminho;
+        }
+        const r = await window.api.existe(caminho).catch(() => ({ existe: false }));
+        if (!r.existe) return null; // o que não existe não se sublinha
+        return {
+          range: {
+            start: { x: achado.index + 1, y: numeroDaLinha },
+            end: { x: achado.index + achado[0].length, y: numeroDaLinha },
+          },
+          text: achado[0],
+          activate: (ev) => { if (ev.ctrlKey) abrirCaminhoDaTela(r.caminho, linhaDoCursor, r.pasta); },
+        };
+      });
+      Promise.all(promessas).then((links) => {
+        const vivos = links.filter(Boolean);
+        entregar(vivos.length ? vivos : undefined);
+      });
+    },
+  });
+
+  // Nenhum atalho próprio: tudo vai pro bash. As únicas exceções são as
+  // mesmas do Konsole: Ctrl+Shift+C copia, Ctrl+Shift+V cola, Ctrl+Shift+F
+  // abre a busca, Ctrl+Shift+T abre outro terminal na coluna e
+  // Ctrl+Shift+K limpa o rolo da tela.
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true;
     if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') {
@@ -618,16 +738,64 @@ async function criarTerminal(pasta, col) {
       ev.preventDefault();
       return false;
     }
+    if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyF') {
+      abrirBusca(id);
+      ev.preventDefault();
+      return false;
+    }
+    if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyT') {
+      criarTerminal(undefined, terminais.get(id)?.col);
+      ev.preventDefault();
+      return false;
+    }
+    if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyK') {
+      term.clear();
+      ev.preventDefault();
+      return false;
+    }
+    // Ctrl com + (ou =), − e 0: o tamanho da letra, igual ao Konsole. Pelo
+    // ev.key, pra valer em qualquer teclado (no ABNT2 o + é Shift+=).
+    if (ev.ctrlKey && !ev.altKey && ['+', '=', '-', '0'].includes(ev.key)) {
+      mudarLetra(ev.key === '0' ? LETRA_PADRAO
+        : OPCOES_DO_TERMINAL.fontSize + (ev.key === '-' ? -1 : 1));
+      ev.preventDefault();
+      return false;
+    }
     return true;
+  });
+
+  // Ctrl+rodinha em cima do terminal também muda a letra, igual ao Konsole.
+  caixa.addEventListener('wheel', (ev) => {
+    if (!ev.ctrlKey) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    mudarLetra(OPCOES_DO_TERMINAL.fontSize + ((ev.deltaY || ev.deltaX) > 0 ? -1 : 1));
+  }, { passive: false, capture: true });
+
+  // O sino (BEL) de um terminal escondido atrás de outra aba fica marcado
+  // na aba com um ponto aceso: o Claude Code apita quando termina ou quando
+  // quer resposta, e sem a marca o apito de quem está atrás passava em
+  // branco. Trazer o terminal pra frente apaga a marca.
+  term.onBell(() => {
+    const t = terminais.get(id);
+    if (!t || t.col.ativo === id || t.sino) return;
+    t.sino = true;
+    desenharAbas();
   });
 
   // Entra no mapa antes do bash nascer, senão a primeira letra do prompt
   // poderia chegar sem ter quem a receba.
-  terminais.set(id, { term, fit, caixa, info: null, nome: null, col });
+  terminais.set(id, { term, fit, caixa, busca, info: null, nome: null, col, sino: false });
   term.onData((data) => window.api.ptyWrite(id, data));
 
   fit.fit();
-  await window.api.ptySpawn(id, term.cols, term.rows, pasta);
+  // O bash pode nem nascer (shell quebrado, pasta estranha): sem isso a aba
+  // ficava na tela com um terminal morto dentro, mostrando "…" pra sempre.
+  if (!await window.api.ptySpawn(id, term.cols, term.rows, pasta)) {
+    fecharTerminal(id, true);
+    avisar('não consegui abrir o terminal');
+    return null;
+  }
   ativarTerminal(id);
   atualizarInfo(id); // batiza a aba sem esperar a próxima rodada do relógio
   return id;
@@ -638,6 +806,7 @@ function mostrarNaColuna(id) {
   const t = terminais.get(id);
   if (!t) return;
   t.col.ativo = id;
+  t.sino = false; // à mostra, o apito já foi visto
   for (const [outro, o] of terminais) {
     if (o.col === t.col) o.caixa.classList.toggle('escondida', outro !== id);
   }
@@ -651,6 +820,7 @@ function mostrarNaColuna(id) {
 function ativarTerminal(id) {
   const t = terminais.get(id);
   if (!t) return;
+  if (buscaNo !== null && buscaNo !== id) fecharBusca(true); // a busca era de outro terminal
   terminalAtivo = id;
   colunaAtiva = t.col;
   mostrarNaColuna(id);
@@ -662,6 +832,7 @@ function ativarTerminal(id) {
 function fecharTerminal(id, jaEncerrou) {
   const t = terminais.get(id);
   if (!t) return;
+  if (buscaNo === id) fecharBusca(true); // a caixinha sai antes da caixa do terminal morrer
   terminais.delete(id);
   if (!jaEncerrou) window.api.ptyKill(id);
   t.term.dispose();
@@ -732,8 +903,17 @@ function abaDoTerminal(id) {
     marca.title = 'Claude rodando aqui';
     aba.appendChild(marca);
   }
+  if (t.sino) {
+    const sino = document.createElement('span');
+    sino.className = 'sino';
+    sino.textContent = '•';
+    sino.title = 'apitou enquanto estava escondido';
+    aba.appendChild(sino);
+  }
   const titulo = Object.assign(document.createElement('span'), { className: 'titulo', textContent: tituloDaAba(t) });
   aba.appendChild(titulo);
+  // nome comprido é cortado pelo CSS; o mouse parado mostra a pasta inteira
+  aba.title = (t.info && t.info.cwd) || '';
   const x = document.createElement('span');
   x.className = 'x';
   x.textContent = '×';
@@ -744,8 +924,15 @@ function abaDoTerminal(id) {
   });
   aba.appendChild(x);
   aba.addEventListener('click', () => ativarTerminal(id));
+  // clique do meio fecha o terminal, igual ao Konsole
+  aba.addEventListener('auxclick', (ev) => {
+    if (ev.button !== 1) return;
+    ev.preventDefault();
+    fecharTerminal(id);
+  });
   // duplo clique: a coluna do terminal toma a área inteira; de novo, volta
-  aba.addEventListener('dblclick', () => {
+  aba.addEventListener('dblclick', (ev) => {
+    ev.stopPropagation(); // senão a barra entenderia como "abrir outro terminal"
     const dono = terminais.get(id);
     if (dono) alternarZoom(dono.col);
   });
@@ -797,7 +984,8 @@ function desenharAbas() {
       const etiqueta = document.createElement('span');
       etiqueta.className = 'etiqueta';
       etiqueta.textContent = terminais.get(ids[0]).info.nome;
-      etiqueta.title = repo;
+      etiqueta.title = repo + ' — clique pra mostrar na lateral';
+      etiqueta.addEventListener('click', () => revelarRepositorio(repo));
       grupo.appendChild(etiqueta);
       for (const id of ids) grupo.appendChild(abaDoTerminal(id));
       novas.appendChild(grupo);
@@ -808,6 +996,106 @@ function desenharAbas() {
   }
   arrumarFliperama(); // em pé ou deitado, conforme a coluna dele tenha terminal
   atualizarFora(); // o terminal da vez pode ter mudado de pasta, ou outro virou a vez
+
+  // O título da janela acompanha a aba da vez: no alt-tab e na barra de
+  // tarefas dá pra saber qual Bigorna está em quê.
+  const daVez = terminalDaVez();
+  document.title = daVez && daVez.info ? tituloDaAba(daVez) + ' — bigorna' : 'bigorna';
+}
+
+// Clicar na etiqueta do grupo abre a lateral e desce até a pasta do
+// repositório — o atalho pra achar os arquivos do que está rodando ali.
+async function revelarRepositorio(repo) {
+  if (!dentroDe(repo, casa)) return avisar('esse repositório está fora da casa');
+  $('lateral').classList.remove('fechada');
+  atualizarTrilho();
+  await revelarPasta(repo, casa, $('arvore'));
+}
+
+// ============================================================
+// BUSCA NO TERMINAL (Ctrl+Shift+F, igual ao Konsole)
+// ============================================================
+// A caixinha mora dentro da caixa do terminal da vez (canto de cima, à
+// direita) e as ocorrências ficam marcadas na tela. Enter vai pra próxima,
+// Shift+Enter volta, Esc fecha e devolve o teclado pro terminal.
+
+// Marcas em cinza, do jeito da casa: a ocorrência da vez um tom mais clara.
+const DECORACOES_DA_BUSCA = {
+  matchBackground: '#333333',
+  matchOverviewRuler: '#555555',
+  activeMatchBackground: '#6d6d6d',
+  activeMatchColorOverviewRuler: '#9a9a9a',
+};
+
+let buscaNo = null; // id do terminal dono da busca aberta, se houver
+
+function abrirBusca(id) {
+  const t = terminais.get(id);
+  if (!t) return;
+  if (buscaNo !== null && buscaNo !== id) fecharBusca(true);
+  buscaNo = id;
+  t.caixa.appendChild($('busca')); // acompanha o terminal se ele mudar de coluna
+  $('busca').hidden = false;
+  $('busca-texto').focus();
+  $('busca-texto').select();
+}
+
+// semFoco: fechar sem devolver o teclado (o terminal está indo embora, ou
+// outro já o tomou).
+function fecharBusca(semFoco) {
+  if (buscaNo === null) return;
+  const t = terminais.get(buscaNo);
+  buscaNo = null;
+  $('busca').hidden = true;
+  $('busca-conta').textContent = '';
+  document.body.appendChild($('busca')); // sai da caixa do terminal antes de ela morrer
+  if (!t) return;
+  t.busca.clearDecorations();
+  t.term.clearSelection();
+  if (!semFoco) t.term.focus();
+}
+
+// incremental: digitando, a ocorrência atual cresce em vez de pular pra outra.
+function procurar(adiante, incremental) {
+  const t = terminais.get(buscaNo);
+  if (!t) return;
+  const texto = $('busca-texto').value;
+  if (!texto) {
+    t.busca.clearDecorations();
+    $('busca-conta').textContent = '';
+    return;
+  }
+  const opcoes = { decorations: DECORACOES_DA_BUSCA, incremental };
+  if (adiante) t.busca.findNext(texto, opcoes);
+  else t.busca.findPrevious(texto, opcoes);
+}
+
+$('busca-texto').addEventListener('input', () => procurar(true, true));
+$('busca-texto').addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') procurar(!ev.shiftKey, false);
+  else if (ev.key === 'Escape') fecharBusca();
+});
+$('busca-prox').addEventListener('click', () => { procurar(true, false); $('busca-texto').focus(); });
+$('busca-ant').addEventListener('click', () => { procurar(false, false); $('busca-texto').focus(); });
+$('busca-fechar').addEventListener('click', () => fecharBusca());
+
+// O Ctrl+clique num caminho impresso no terminal: pasta desce a lateral
+// até ela; arquivo abre como se tivesse sido pedido de fora (editor ou
+// visor, lateral descendo junto) e, se veio com :linha, o cursor cai nela.
+async function abrirCaminhoDaTela(caminho, linha, ehPasta) {
+  if (ehPasta) {
+    if (!dentroDe(caminho, casa)) return avisar('essa pasta está fora da casa');
+    $('lateral').classList.remove('fechada');
+    atualizarTrilho();
+    return revelarPasta(caminho, casa, $('arvore'));
+  }
+  await abrirPedido(caminho);
+  if (linha && caminho === arquivoAberto && editor && editor.getModel()) {
+    const alvo = Math.min(linha, editor.getModel().getLineCount());
+    editor.setPosition({ lineNumber: alvo, column: 1 });
+    editor.revealLineInCenter(alvo);
+    editor.focus();
+  }
 }
 
 // ============================================================
@@ -877,13 +1165,22 @@ function marcarAtivo(linha) {
   linha.classList.add('aberto-no-editor');
 }
 
+// Cada pasta tem uma geração de leitura: duas releituras da mesma pasta
+// podem se cruzar (os avisos do vigia chegam em rajada, pai e filho
+// separados), e a atrasada não pode escrever por cima da mais nova —
+// senão a lista ficava presa num pedaço de tela morto até reabrir.
+const geracaoDaPasta = new Map();
+
 async function montarPasta(dir, recipiente, nivel) {
+  const geracao = (geracaoDaPasta.get(dir) || 0) + 1;
+  geracaoDaPasta.set(dir, geracao);
   let itens;
   try {
     itens = await window.api.listDir(dir);
   } catch {
     return; // sem permissão de ler: deixa quieto
   }
+  if (geracaoDaPasta.get(dir) !== geracao) return; // outra releitura passou na frente
   window.api.vigiarPasta(dir); // mudou algo nela (até por fora), a lista relê
   const novas = document.createDocumentFragment();
   const reabrir = [];
@@ -918,7 +1215,11 @@ async function montarPasta(dir, recipiente, nivel) {
   }
   // Troca tudo de uma vez: relendo uma pasta, a lista não pisca vazia.
   recipiente.replaceChildren(novas);
-  for (const linha of reabrir) await alternarPasta(linha, true);
+  for (const linha of reabrir) {
+    if (geracaoDaPasta.get(dir) !== geracao) return; // ficou velha no meio das filhas
+    await alternarPasta(linha, true);
+  }
+  if ($('filtro').value) aplicarFiltro(); // a lista nova entra já filtrada
 }
 
 async function alternarPasta(linha, abrir) {
@@ -938,6 +1239,12 @@ async function alternarPasta(linha, abrir) {
 // Abre a árvore, pasta por pasta, de `raiz` até `alvo`, e rola até ele aparecer.
 async function revelarPasta(alvo, raiz, recipiente) {
   if (!alvo || alvo === raiz || !alvo.startsWith(raiz.replace(/\/$/, '') + '/')) return;
+  // Revelar com o filtro ativo desceria até um item escondido: o filtro
+  // limpa antes, senão a lateral abre "vazia" apontando pro invisível.
+  if ($('filtro').value) {
+    $('filtro').value = '';
+    aplicarFiltro();
+  }
   let linha = null;
   let caminho = raiz.replace(/\/$/, '');
   for (const nome of alvo.slice(caminho.length + 1).split('/')) {
@@ -1041,6 +1348,55 @@ async function recarregarPasta(dir) {
 $('btn-lateral').addEventListener('click', () => {
   $('lateral').classList.toggle('fechada');
   atualizarTrilho();
+});
+
+// O botão "ocultos" na linha das pastas esconde e mostra os arquivos de
+// ponto, nas duas metades da lateral. Só a tela muda (a lista continua
+// inteira por baixo), e o escondido fica no caderninho de ajustes.
+$('btn-ocultos').addEventListener('click', () => {
+  const sem = $('lateral').classList.toggle('sem-ocultos');
+  $('btn-ocultos').classList.toggle('riscado', sem);
+  guardarAjuste('ocultos', sem || undefined); // escondido fica guardado
+  if ($('filtro').value) aplicarFiltro(); // a conta do filtro muda junto
+});
+
+// ---------- filtro no pé da lateral ----------
+// Digitar esconde o que não casa com o texto, nas duas metades. Pasta
+// aberta fica à mostra se algum filho casar; pasta fechada só pelo nome
+// (ninguém vasculha o disco por causa do filtro). Esc limpa.
+
+function aplicarFiltro() {
+  const texto = $('filtro').value.trim().toLowerCase();
+  filtrarRecipiente($('arvore'), texto);
+  filtrarRecipiente($('arvore-fora'), texto);
+}
+
+// responde se algo ficou à mostra dentro do recipiente
+function filtrarRecipiente(recipiente, texto) {
+  // o que o botão "ocultos" escondeu não conta: um pai não pode ficar à
+  // mostra por causa de um filho de ponto que o usuário mandou esconder
+  const semOcultos = $('lateral').classList.contains('sem-ocultos');
+  let algum = false;
+  for (const el of recipiente.children) {
+    if (!el.dados) continue; // as caixas de filhos são tratadas pelo item delas
+    const escondido = semOcultos && el.classList.contains('oculto');
+    let mostra = !escondido && (!texto || el.dados.nome.toLowerCase().includes(texto));
+    if (!escondido && el.dados.ehPasta && el.dados.filhos && texto) {
+      mostra = filtrarRecipiente(el.dados.filhos, texto) || mostra;
+    } else if (el.dados.ehPasta && el.dados.filhos && !texto) {
+      filtrarRecipiente(el.dados.filhos, texto); // limpar também desce
+    }
+    el.classList.toggle('fora-do-filtro', !mostra);
+    algum = algum || mostra;
+  }
+  return algum;
+}
+
+$('filtro').addEventListener('input', aplicarFiltro);
+$('filtro').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape') return;
+  $('filtro').value = '';
+  aplicarFiltro();
 });
 
 // ============================================================
@@ -1169,7 +1525,7 @@ function abrirSubmenu(itemPai, itens) {
 }
 
 function itensDoMenu(linha, opcoes) {
-  const { caminho } = linha.dados;
+  const { caminho, ehPasta } = linha.dados;
   const ic = opcoes.icones;
   return [
     {
@@ -1179,6 +1535,10 @@ function itensDoMenu(linha, opcoes) {
         ? opcoes.programas.map((p) => ({ texto: p.nome, icone: p.icone, acao: () => window.api.abrirCom(p.arquivo, caminho) }))
         : [{ texto: 'nenhum programa encontrado', desligado: true }],
     },
+    '-',
+    // Na pasta, o terminal abre nela; no arquivo, na pasta onde ele está.
+    { texto: 'Abrir terminal aqui', icone: ic.terminal, acao: () => criarTerminal(ehPasta ? caminho : pastaDe(caminho)) },
+    { texto: 'Copiar caminho', icone: ic.copiarCaminho, acao: () => window.api.copiar(caminho) },
     '-',
     {
       texto: 'Criar novo',
@@ -1222,6 +1582,14 @@ const ERRO_DA_WORKTREE = {
   'ja-e-a-principal': 'essa é a branch da pasta principal',
   'sem-main': 'esse repositório não tem main nem master',
   mexido: 'tem arquivo mexido sem commit; a branch não pode mudar de casa',
+  'git-na-principal': 'não deu — e a pasta principal ficou na main/master; confere a branch lá',
+};
+
+const ERRO_DO_FECHAR = {
+  'fora-de-repo': 'essa aba não está num repositório git',
+  'nao-e-worktree': 'essa aba está na pasta principal, não numa worktree',
+  mexido: 'tem arquivo mexido sem commit; a worktree não fecha',
+  git: 'o git recusou fechar essa worktree',
 };
 
 let iconesDaAba = null; // vêm do sistema uma vez só
@@ -1252,6 +1620,11 @@ function itensDaAba(id) {
     branch && !BRANCHES_DA_PRINCIPAL.includes(branch)
       ? { texto: `Abrir worktree de ${branch}`, icone: ic.worktree, acao: () => abrirWorktree(id) }
       : { texto: 'Abrir worktree', icone: ic.worktree, desligado: true },
+    // o caminho de volta, só pra quem está numa worktree: a pasta dela some
+    // (com confirmação e tudo commitado), a branch fica no repositório
+    t.info && t.info.repo && t.info.cwd && !dentroDe(t.info.cwd, t.info.repo)
+      ? { texto: 'Fechar worktree (apaga a pasta)…', icone: ic.fecharWorktree, acao: () => fecharWorktree(id) }
+      : { texto: 'Fechar worktree', icone: ic.fecharWorktree, desligado: true },
     '-',
     { texto: 'Renomear aba…', icone: ic.renomear, acao: () => renomearAba(id) },
     { texto: 'Fechar terminal', icone: ic.fechar, acao: () => fecharTerminal(id) },
@@ -1281,6 +1654,21 @@ async function abrirWorktree(id) {
   if (r.erro) return avisar(ERRO_DA_WORKTREE[r.erro] || 'não consegui abrir a worktree');
   await criarTerminal(r.caminho, t.col); // na mesma coluna da aba de origem
   atualizarInfo(id); // a aba de origem já está em outra branch
+}
+
+// Fecha a worktree da aba: a pasta some do disco (o processo principal
+// confirma na tela e só aceita com tudo commitado), a branch continua no
+// repositório, e os terminais que moravam na pasta fecham junto.
+async function fecharWorktree(id) {
+  const t = terminais.get(id);
+  if (!t || !t.info || !t.info.cwd) return;
+  const r = await window.api.fecharWorktree(t.info.cwd).catch(() => ({ erro: 'git' }));
+  if (r.cancelado) return;
+  if (r.erro) return avisar(ERRO_DO_FECHAR[r.erro] || 'não consegui fechar a worktree');
+  for (const [outro, o] of [...terminais]) {
+    if (o.info && dentroDe(o.info.cwd, r.pasta)) fecharTerminal(outro);
+  }
+  avisar('worktree fechada; a branch continua no repositório');
 }
 
 // Nome escolhido na mão, igual ao renomear da lateral. Apagar tudo e dar Enter
@@ -1395,10 +1783,29 @@ async function renomear(linha) {
       pastasAbertas.add(destino + c.slice(caminho.length));
     }
   }
+  // As pastas já lidas e os vigias delas também mudam de endereço: o inotify
+  // segue a pasta pelo nome velho e avisava um caminho que não existe mais,
+  // enquanto o novo ficava sem ninguém olhando.
+  for (const [c, lida] of [...pastasLidas]) {
+    if (!dentroDe(c, caminho)) continue;
+    pastasLidas.delete(c);
+    window.api.desvigiarPasta(c);
+    const novoC = destino + c.slice(caminho.length);
+    pastasLidas.set(novoC, lida);
+    window.api.vigiarPasta(novoC);
+  }
+  if (dentroDe(pastaVigiadaDoArquivo, caminho)) {
+    window.api.desvigiarPasta(pastaVigiadaDoArquivo);
+    pastaVigiadaDoArquivo = destino + pastaVigiadaDoArquivo.slice(caminho.length);
+    window.api.vigiarPasta(pastaVigiadaDoArquivo);
+  }
   if (dentroDe(arquivoAberto, caminho)) {
     arquivoAberto = destino + arquivoAberto.slice(caminho.length);
     $('nome-arquivo').textContent = arquivoAberto;
   }
+  // O "último texto" que o botão do editor reabre também muda de nome,
+  // senão o botão tentaria abrir o caminho que não existe mais.
+  if (dentroDe(ultimoTexto, caminho)) ultimoTexto = destino + ultimoTexto.slice(caminho.length);
   await recarregarPasta(pastaDe(caminho));
 }
 
@@ -1477,14 +1884,23 @@ function salvarAgora() {
   if (salvarAgendado) salvar();
 }
 
-// Aviso curto no canto de baixo da janela, por cima do que estiver na tela.
-let avisoAgendado = null;
+// Avisos curtos no canto de baixo da janela, empilhados: um não atropela
+// o outro quando chegam dois seguidos. O mesmo texto de novo só renova o
+// tempo do que já está na tela, e passando de 4 o mais velho sai.
 function avisar(texto) {
-  const el = $('aviso');
+  const pilha = $('avisos');
+  const ultimo = pilha.lastElementChild;
+  if (ultimo && ultimo.textContent === texto) {
+    clearTimeout(ultimo.espera);
+    ultimo.espera = setTimeout(() => ultimo.remove(), 3000);
+    return;
+  }
+  const el = document.createElement('div');
+  el.className = 'aviso';
   el.textContent = texto;
-  el.hidden = false;
-  clearTimeout(avisoAgendado);
-  avisoAgendado = setTimeout(() => { el.hidden = true; }, 3000);
+  pilha.appendChild(el);
+  while (pilha.childElementCount > 4) pilha.firstElementChild.remove();
+  el.espera = setTimeout(() => el.remove(), 3000);
 }
 
 // Quebrou por dentro: aparece no aviso em vez de morrer calado no console
@@ -1549,12 +1965,14 @@ function visorNaFrente(caminho) {
 async function abrirMidia(caminho, tipo) {
   limparVisor();
   visorNaFrente(caminho);
+  ultimaMidia = caminho; // pro botão do visor no trilho reabrir
   const alvo = $('visor');
 
   const endereco = enderecoDoArquivo(caminho);
   let el;
   if (tipo === 'imagem') {
     el = document.createElement('img');
+    ligarZoomDaImagem(el);
   } else if (tipo === 'pdf') {
     el = document.createElement('iframe'); // o visor de PDF do próprio Chromium
   } else {
@@ -1564,8 +1982,11 @@ async function abrirMidia(caminho, tipo) {
   el.src = endereco;
 
   // Arquivo que o Chromium não consegue ler (ex.: vídeo em formato raro).
+  // O erro pode chegar atrasado, com outro arquivo já na tela: só fecha se
+  // o que falhou ainda é o que está aberto.
   if (tipo !== 'pdf') {
     el.addEventListener('error', () => {
+      if (arquivoAberto !== caminho) return;
       avisar(tipo === 'imagem' ? 'não consegui mostrar essa imagem' : 'não consegui tocar esse arquivo');
       fecharArquivo();
     });
@@ -1583,6 +2004,59 @@ async function abrirMidia(caminho, tipo) {
 
   alvo.append(mostrado);
   atualizarTrilho(); // agora o visor tem o que acender
+}
+
+// ---------- zoom e arrasto na imagem do visor ----------
+// A rodinha aproxima e afasta, centrada no ponto do mouse; com a imagem
+// ampliada, arrastar move e o duplo clique volta ao tamanho de encaixe.
+// Tudo por transform, então a imagem original nunca é recarregada.
+function ligarZoomDaImagem(img) {
+  let escala = 1;
+  let x = 0;
+  let y = 0;
+  const aplicar = () => {
+    img.style.transform = escala === 1 ? '' : `translate(${x}px, ${y}px) scale(${escala})`;
+    img.style.cursor = escala === 1 ? '' : 'grab';
+  };
+  img.addEventListener('wheel', (ev) => {
+    ev.preventDefault();
+    const nova = Math.min(32, Math.max(1, escala * (ev.deltaY < 0 ? 1.25 : 0.8)));
+    if (nova === escala) return;
+    // o ponto embaixo do mouse fica parado: o deslocamento compensa a escala
+    const r = img.getBoundingClientRect();
+    const px = ev.clientX - (r.left + r.width / 2);
+    const py = ev.clientY - (r.top + r.height / 2);
+    const fator = nova / escala;
+    x += px * (1 - fator);
+    y += py * (1 - fator);
+    escala = nova;
+    if (escala === 1) x = y = 0; // de volta ao encaixe, de volta ao centro
+    aplicar();
+  });
+  img.addEventListener('mousedown', (ev) => {
+    if (escala === 1 || ev.button !== 0) return;
+    ev.preventDefault(); // sem isso o navegador arrastaria a imagem em si
+    const x0 = ev.clientX - x;
+    const y0 = ev.clientY - y;
+    img.style.cursor = 'grabbing';
+    const mover = (m) => {
+      x = m.clientX - x0;
+      y = m.clientY - y0;
+      aplicar();
+    };
+    const soltar = () => {
+      window.removeEventListener('mousemove', mover);
+      window.removeEventListener('mouseup', soltar);
+      aplicar();
+    };
+    window.addEventListener('mousemove', mover);
+    window.addEventListener('mouseup', soltar);
+  });
+  img.addEventListener('dblclick', () => {
+    escala = 1;
+    x = y = 0;
+    aplicar();
+  });
 }
 
 // ---------- Fliperama: o console mora na área dos terminais ----------
@@ -1733,6 +2207,12 @@ function abaDoFliperama() {
   });
   aba.appendChild(x);
   aba.addEventListener('click', () => fliperama.tela.focus());
+  // clique do meio sai do jogo (salvando o ponto), como nas abas de terminal
+  aba.addEventListener('auxclick', (ev) => {
+    if (ev.button !== 1) return;
+    ev.preventDefault();
+    fecharFliperama();
+  });
   return aba;
 }
 
@@ -1833,10 +2313,12 @@ async function abrirFliperama(caminho) {
 // com terminal em cima, o terminal fica com a coluna inteira.
 async function fecharFliperama() {
   if (!fliperama) return;
-  await guardarPonto();
-  desligarEmulador();
+  // As referências saem antes do await: o segundo clique no × (ou o Ctrl+Q
+  // junto) via o fliperama nulo no meio do caminho e quebrava por dentro.
   const { col, el, divisa } = fliperama;
   fliperama = null;
+  await guardarPonto();
+  desligarEmulador();
   el.remove();
   divisa.remove();
   col.el.classList.remove('fl-inteira');
@@ -1953,8 +2435,9 @@ async function rodarJogo(caminho) {
       : 'não consegui ler esse arquivo');
   }
 
+  let novo;
   try {
-    jogo = await Nostalgist.launch({
+    novo = await Nostalgist.launch({
       core,
       element: tela,
       size: 'auto', // quem manda no tamanho é o console, não o tamanho da janela:
@@ -1967,9 +2450,17 @@ async function rodarJogo(caminho) {
       rom: { fileName: caminho.slice(caminho.lastIndexOf('/') + 1), fileContent: fita.bytes },
     });
   } catch {
-    return avisar('esse arquivo não abriu como jogo');
+    if (jogoPedido === caminho) avisar('esse arquivo não abriu como jogo');
+    return;
   }
-  if (jogoPedido !== caminho) return; // trocou de jogo enquanto este subia
+  // Trocou de jogo (ou fechou o fliperama) enquanto este subia: o emulador
+  // recém-nascido é desligado, senão ficava rodando no escuro, com som e
+  // tudo, por baixo do outro. O canvas fica: é do jogo que valeu.
+  if (jogoPedido !== caminho || !fliperama) {
+    novo.exit({ removeCanvas: false });
+    return;
+  }
+  jogo = novo;
 
   jogoAtual = caminho;
   desenharAbas(); // a aba troca "preparando" pelo nome valendo
@@ -2008,6 +2499,7 @@ function atualizarTrilho() {
 }
 
 let ultimoTexto = null; // o último arquivo de texto aberto, pro botão do editor reabrir
+let ultimaMidia = null; // a última mídia aberta, pro botão do visor reabrir
 
 // Editor: ligado, fecha o arquivo; desligado, reabre o último texto.
 $('btn-editor').addEventListener('click', () => {
@@ -2016,10 +2508,11 @@ $('btn-editor').addEventListener('click', () => {
   else avisar('clique num arquivo de texto na lateral');
 });
 
-// Visor: ligado, fecha a mídia; desligado, só diz de onde ela vem.
+// Visor: ligado, fecha a mídia; desligado, reabre a última (como o editor).
 $('btn-visor').addEventListener('click', () => {
   if ($('btn-visor').classList.contains('ligada')) return fecharArquivo();
-  avisar('clique numa imagem, som, vídeo ou PDF na lateral');
+  if (ultimaMidia) abrirArquivo(ultimaMidia);
+  else avisar('clique numa imagem, som, vídeo ou PDF na lateral');
 });
 
 // Fliperama: desligado, liga o videogame; ligado, sai guardando o ponto.
@@ -2041,15 +2534,25 @@ $('btn-casa').addEventListener('click', async () => {
   atualizarTrilho();
 });
 
+// Cada abertura leva uma senha: clicou noutro arquivo enquanto um grande
+// ainda carregava, a leitura atrasada do primeiro é jogada fora — senão o
+// clique antigo vencia o novo e a tela mostrava um com o outro marcado.
+let pedidosDeAbrir = 0;
+
 async function abrirArquivo(caminho) {
   salvarAgora(); // o arquivo que está saindo não perde a última mudança
 
   // Imagem, som, vídeo, PDF e jogo não vão pro editor de texto: abrem no visor.
   const tipo = tipoDeMidia(caminho);
   if (tipo === 'jogo') return abrirFliperama(caminho); // vai pra área dos terminais
-  if (tipo) return abrirMidia(caminho, tipo);
+  if (tipo) {
+    pedidosDeAbrir++; // a mídia também cancela leitura de texto a caminho
+    return abrirMidia(caminho, tipo);
+  }
 
+  const pedido = ++pedidosDeAbrir;
   const r = await window.api.readFile(caminho).catch(() => ({ erro: 'leitura' }));
+  if (pedido !== pedidosDeAbrir) return; // clicou noutro enquanto o disco lia
   if (r.erro) {
     avisar(
       r.erro === 'binario' ? 'esse arquivo não é texto' :
@@ -2060,6 +2563,7 @@ async function abrirArquivo(caminho) {
   }
 
   await monacoPronto();
+  if (pedido !== pedidosDeAbrir) return; // o Monaco demorou e o clique mudou
 
   if (!editor) {
     editor = monaco.editor.create($('editor'), {
@@ -2107,6 +2611,7 @@ function vigiarPastaDoArquivo(caminho) {
 // Fecha o que está na tela (texto ou mídia) e volta pra tela de nenhum arquivo.
 function fecharArquivo() {
   salvarAgora(); // fechar não perde a última mudança
+  pedidosDeAbrir++; // leitura a caminho não reabre o que acabou de fechar
 
   limparVisor();
   $('visor').hidden = true;
@@ -2135,11 +2640,18 @@ async function salvar(forcado) {
   salvarAgendado = null;
   // Sem modelo é mídia no visor: salvar aqui escreveria texto em cima dela.
   if (!editor || !editor.getModel() || !arquivoAberto) return;
+  const alvo = arquivoAberto; // o arquivo pode trocar enquanto o disco grava
   try {
-    const r = await window.api.writeFile(arquivoAberto, editor.getValue(), forcado ? null : mtimeAberto);
+    const r = await window.api.writeFile(alvo, editor.getValue(), forcado ? null : mtimeAberto);
     // Alguém (git, Claude no terminal) mexeu no arquivo depois que a janela
-    // leu: gravar agora apagaria a mudança dele. Ctrl+S é quem decide.
+    // leu: gravar agora apagaria a mudança dele. Ctrl+S é quem decide. O
+    // aviso vale mesmo que já se tenha trocado de arquivo nesse meio tempo:
+    // a edição que ficou pra trás não foi gravada, e calar seria mentir.
     if (r.erro === 'mudou-por-fora') return avisar('o arquivo mudou por fora da Bigorna — Ctrl+S grava por cima');
+    if (r.erro) return avisar('não consegui salvar'); // recusa calada viraria "salvo" de mentira
+    // Trocou de arquivo durante a gravação: o mtime que voltou é do antigo,
+    // e gravar ele em cima do controle do novo confundiria o "mudou por fora".
+    if (alvo !== arquivoAberto) return;
     mtimeAberto = r.mtime ?? mtimeAberto;
     const agora = new Date();
     const hora = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
@@ -2201,6 +2713,22 @@ window.addEventListener('keydown', (ev) => {
 }, true); // "true": a janela ouve a tecla antes do terminal e do editor
 
 // ============================================================
+// AJUSTES GUARDADOS: o que sobrevive entre aberturas
+// ============================================================
+// O caderninho (ajustes.json na pasta de configuração) guarda as larguras
+// da lateral e do arquivo, a letra e os ocultos. A espera curta junta uma
+// sequência de mudanças numa gravação só.
+
+let ajustes = {};
+let gravarAjustesAgendado = null;
+function guardarAjuste(chave, valor) {
+  if (valor === undefined) delete ajustes[chave];
+  else ajustes[chave] = valor;
+  clearTimeout(gravarAjustesAgendado);
+  gravarAjustesAgendado = setTimeout(() => window.api.gravarAjustes(ajustes), 400);
+}
+
+// ============================================================
 // DIVISOR da lateral (largura das pastas)
 // ============================================================
 
@@ -2219,13 +2747,17 @@ $('divisor-lateral').addEventListener('mousedown', (evInicio) => {
     lateral.classList.remove('arrastando');
     window.removeEventListener('mousemove', mover);
     window.removeEventListener('mouseup', soltar);
+    guardarAjuste('larguraDaLateral', Math.round(lateral.getBoundingClientRect().width));
   }
   window.addEventListener('mousemove', mover);
   window.addEventListener('mouseup', soltar);
 });
 
-// Duplo clique devolve a largura de partida.
-$('divisor-lateral').addEventListener('dblclick', () => $('lateral').style.setProperty('--largura', '240px'));
+// Duplo clique devolve a largura de partida (e limpa o ajuste guardado).
+$('divisor-lateral').addEventListener('dblclick', () => {
+  $('lateral').style.setProperty('--largura', '240px');
+  guardarAjuste('larguraDaLateral', undefined);
+});
 
 // ============================================================
 // DIVISOR entre o arquivo e o terminal (largura do arquivo)
@@ -2244,19 +2776,33 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
   function soltar() {
     window.removeEventListener('mousemove', mover);
     window.removeEventListener('mouseup', soltar);
+    guardarAjuste('larguraDoArquivo', Math.round(area.getBoundingClientRect().width));
   }
   window.addEventListener('mousemove', mover);
   window.addEventListener('mouseup', soltar);
 });
 
-// Duplo clique devolve o meio a meio.
-$('divisor').addEventListener('dblclick', () => { $('editor-area').style.width = ''; });
+// Duplo clique devolve o meio a meio (e limpa o ajuste guardado).
+$('divisor').addEventListener('dblclick', () => {
+  $('editor-area').style.width = '';
+  guardarAjuste('larguraDoArquivo', undefined);
+});
 
 // ============================================================
 // PARTIDA
 // ============================================================
 
 (async () => {
+  // o caderninho de ajustes entra antes de tudo, pra tela já nascer no jeito
+  ajustes = await window.api.lerAjustes().catch(() => ({})) || {};
+  if (ajustes.larguraDaLateral) $('lateral').style.setProperty('--largura', ajustes.larguraDaLateral + 'px');
+  if (ajustes.larguraDoArquivo) $('editor-area').style.width = ajustes.larguraDoArquivo + 'px';
+  if (ajustes.letra) OPCOES_DO_TERMINAL.fontSize = Math.max(6, Math.min(32, ajustes.letra));
+  if (ajustes.ocultos) {
+    $('lateral').classList.add('sem-ocultos');
+    $('btn-ocultos').classList.add('riscado');
+  }
+
   pastaPedida = await window.api.pastaPedida();
   const arquivo = await window.api.arquivoPedido();
   // A Bigorna abre só com o terminal; a lateral fica pro botão do trilho

@@ -8,10 +8,12 @@ contextBridge.exposeInMainWorld('api', {
   ptyKill: (id) => ipcRenderer.send('pty:kill', id),
   ptyInfo: (id) => ipcRenderer.invoke('pty:info', id),
   onPtyData: (cb) => ipcRenderer.on('pty:data', (_ev, id, data) => cb(id, data)),
+  abrirLink: (url) => ipcRenderer.send('acao:abrir-link', url),
   onPtyExit: (cb) => ipcRenderer.on('pty:exit', (_ev, id, codigo) => cb(id, codigo)),
 
   // worktree a partir da aba do terminal
   abrirWorktree: (cwd) => ipcRenderer.invoke('git:worktree', cwd),
+  fecharWorktree: (cwd) => ipcRenderer.invoke('git:fechar-worktree', cwd),
   iconesDaAba: () => ipcRenderer.invoke('menu:icones-da-aba'),
 
   // arquivos
@@ -22,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
   raizDeFora: (pasta) => ipcRenderer.invoke('fs:raiz-de-fora', pasta),
   temaDeIcones: () => ipcRenderer.invoke('icones:tema'),
   listDir: (dir) => ipcRenderer.invoke('fs:list', dir),
+  existe: (caminho) => ipcRenderer.invoke('fs:existe', caminho),
   readFile: (arquivo) => ipcRenderer.invoke('fs:read', arquivo),
   writeFile: (arquivo, conteudo, mtimeConhecido) => ipcRenderer.invoke('fs:write', arquivo, conteudo, mtimeConhecido),
   vigiarPasta: (dir) => ipcRenderer.invoke('fs:watch', dir),
@@ -42,6 +45,10 @@ contextBridge.exposeInMainWorld('api', {
   excluir: (caminho) => ipcRenderer.invoke('fs:delete', caminho),
   compactar: (caminho) => ipcRenderer.invoke('fs:zip', caminho),
 
+  // ajustes guardados entre aberturas (largura da lateral e companhia)
+  lerAjustes: () => ipcRenderer.invoke('ajustes:ler'),
+  gravarAjustes: (ajustes) => ipcRenderer.send('ajustes:gravar', ajustes),
+
   // jogos
   coreDoJogo: (core) => ipcRenderer.invoke('jogo:core', core),
   lerBytes: (arquivo) => ipcRenderer.invoke('fs:bytes', arquivo),
@@ -56,5 +63,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // área de transferência (pro Ctrl+Shift+C/V do terminal, igual ao Konsole)
   copiar: (texto) => clipboard.writeText(texto),
-  colar: () => clipboard.readText(),
+  // async de propósito: a tela faz .then() — sem a promessa, o Ctrl+Shift+V
+  // quebrava com "erro interno" e não colava nada
+  colar: async () => clipboard.readText(),
 });

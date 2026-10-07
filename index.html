@@ -10,6 +10,15 @@
   <!-- a sombra que mostra onde a aba arrastada vai cair -->
   <div id="sombra-de-soltar" hidden></div>
 
+  <!-- a busca no terminal (Ctrl+Shift+F): mora dentro da caixa do terminal da vez -->
+  <div id="busca" hidden>
+    <input id="busca-texto" spellcheck="false" placeholder="buscar">
+    <span id="busca-conta"></span>
+    <button id="busca-ant" title="Anterior (Shift+Enter)">‹</button>
+    <button id="busca-prox" title="Próxima (Enter)">›</button>
+    <span class="x" id="busca-fechar" title="Fechar (Esc)">×</span>
+  </div>
+
   <div id="corpo">
     <!-- o trilho: a bigorna é o terminal (sempre acesa) e, embaixo dela, as
          ferramentas penduradas — acesa é a que está na tela -->
@@ -35,13 +44,16 @@
     </nav>
 
     <aside id="lateral">
-      <div class="rot"><span class="seg on">pastas</span><span class="seg" id="raiz-nome"></span></div>
+      <div class="rot"><span class="seg on">pastas</span><span class="seg" id="raiz-nome"></span><span class="seg btn" id="btn-ocultos" title="Mostrar ou esconder os arquivos de ponto (ocultos)">ocultos</span></div>
       <div id="arvore"></div>
       <!-- metade de baixo: aparece quando o terminal da vez está fora da casa -->
       <div id="fora" hidden>
         <div class="rot"><span class="seg on">fora</span><span class="seg" id="fora-nome"></span></div>
         <div id="arvore-fora"></div>
       </div>
+      <!-- o filtro, no pé: digitar esconde o que não casa -->
+      <input id="filtro" spellcheck="false" placeholder="filtrar"
+        title="Esconde o que não casa com o texto (pasta fechada não é vasculhada); Esc limpa">
     </aside>
     <div id="divisor-lateral" title="Arraste pra mudar a largura da lateral; duplo clique volta ao padrão"></div>
 
@@ -66,13 +78,15 @@
     </main>
   </div>
 
-  <!-- aviso curto, no canto de baixo, por cima de tudo -->
-  <div id="aviso" hidden></div>
+  <!-- avisos curtos, empilhados no canto de baixo, por cima de tudo -->
+  <div id="avisos"></div>
 
   <!-- ordem importa: xterm antes do loader do Monaco (o loader confunde scripts UMD) -->
   <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="node_modules/@xterm/addon-webgl/lib/addon-webgl.js"></script>
+  <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+  <script src="node_modules/@xterm/addon-search/lib/addon-search.js"></script>
   <script src="node_modules/nostalgist/dist/nostalgist.umd.js"></script>
   <script src="node_modules/monaco-editor/min/vs/loader.js"></script>
   <script src="renderer.js"></script>

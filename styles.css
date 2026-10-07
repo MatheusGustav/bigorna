@@ -142,7 +142,7 @@ button { font: inherit; }
 }
 .ferramenta:hover::after { display: block; }
 #trilho .espaco { flex: 1; }
-/* quantos Claudes estão rodando, somados de todas as abas */
+/* o selo: a estrela de 7 pontas no pé do trilho, só enfeite */
 #selo {
   width: 28px;
   height: 28px;
@@ -213,9 +213,31 @@ button { font: inherit; }
   outline: none;
 }
 .item.oculto { color: var(--texto-fraco); }      /* arquivos que começam com ponto */
+/* o botão "ocultos" da linha de cima: riscado = os de ponto estão escondidos.
+   A pasta oculta esconde os filhos junto (a caixa deles vem logo depois dela). */
+#lateral .rot .btn { cursor: pointer; }
+#lateral .rot .btn:hover { color: var(--texto); }
+#btn-ocultos.riscado { text-decoration: line-through; }
+#lateral.sem-ocultos .item.oculto,
+#lateral.sem-ocultos .item.oculto + .filhos { display: none; }
 .item .icone { flex: none; width: 14px; height: 14px; }
 .filhos { display: none; }
 .filhos.expandida { display: block; }
+
+/* o filtro no pé da lateral; o que não casa some, com os filhos junto */
+#filtro {
+  flex: none;
+  margin: 6px;
+  padding: 3px 6px;
+  font: inherit;
+  color: var(--texto);
+  background: var(--fundo-2);
+  border: 1px solid var(--borda);
+  outline: none;
+}
+#filtro:focus { border-color: #555; }
+#filtro::placeholder { color: #4e4e4e; }
+.item.fora-do-filtro, .item.fora-do-filtro + .filhos { display: none; }
 
 /* ---------- a peça do arquivo: editor, visor ou mesa de jogo ---------- */
 #editor-area {
@@ -251,6 +273,7 @@ button { font: inherit; }
   align-items: center;
   justify-content: center;
   background: var(--fundo);
+  overflow: hidden; /* a imagem ampliada não vaza da moldura */
 }
 #visor img, #visor video {
   max-width: calc(100% - 28px);
@@ -471,7 +494,9 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   font-size: 12px;
   color: var(--cor);
   white-space: nowrap;
+  cursor: pointer; /* clicar desce a lateral até a pasta do repositório */
 }
+.etiqueta:hover { filter: brightness(1.35); }
 .aba {
   display: flex;
   align-items: center;
@@ -482,6 +507,9 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   cursor: pointer;
 }
 .aba:hover { color: #b4b4b4; }
+/* nome comprido (branch quilométrica) não engole a barra: corta com
+   reticências; o title da aba mostra a pasta inteira ao parar o mouse */
+.aba .titulo { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .aba.alvo-do-menu { color: var(--texto); }      /* clicada com o botão direito */
 .aba .caixa-nome { width: 100px; flex: none; font-size: 13px; }
 /* a ativa fica entre colchetes na cor do grupo */
@@ -491,6 +519,8 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
 /* na coluna sem o foco do teclado, a aba ativa fica um tom mais apagada */
 .coluna:not(.foco) .aba.ativa { color: #b4b4b4; }
 .aba .claude { font-size: 10px; color: var(--brasa); }
+/* o terminal escondido apitou (sino): um ponto aceso até a aba ser aberta */
+.aba .sino { font-size: 15px; line-height: 1; color: var(--brasa); }
 .aba .x { opacity: .6; font-size: 19px; line-height: 1; margin-top: -2px; }
 .aba .x:hover { opacity: 1; }
 .aba.arrastando { opacity: .35; }
@@ -547,13 +577,62 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   font-weight: 600;
 }
 
-/* ---------- aviso curto no canto de baixo ---------- */
-#aviso {
+/* ---------- busca no terminal (Ctrl+Shift+F) ---------- */
+#busca {
+  position: absolute;
+  top: 4px;
+  right: 12px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--fundo-2);
+  border: 1px solid var(--borda-2);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+#busca-texto {
+  width: 170px;
+  font: inherit;
+  color: var(--texto);
+  background: var(--fundo);
+  border: 1px solid #555;
+  padding: 2px 5px;
+  outline: none;
+}
+#busca-conta {
+  color: var(--texto-fraco);
+  font-size: 11px;
+  min-width: 34px;
+  text-align: center;
+}
+#busca button {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--texto-fraco);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+#busca button:hover { color: var(--texto); border-color: var(--borda-2); }
+#busca .x { cursor: pointer; color: #5a5a5a; font-size: 17px; line-height: 1; padding: 0 2px; }
+#busca .x:hover { color: var(--texto); }
+
+/* ---------- avisos curtos, empilhados no canto de baixo ---------- */
+#avisos {
   position: fixed;
   right: 14px;
   bottom: 14px;
   z-index: 90;
   max-width: 60%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+.aviso {
+  max-width: 100%;
   padding: 6px 10px;
   font-size: 11px;
   color: var(--texto);
@@ -564,7 +643,6 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  pointer-events: none;
 }
 
 /* ---------- menu do botão direito (no estilo do menu do Dolphin) ---------- */

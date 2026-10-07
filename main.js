@@ -340,11 +340,66 @@ ipcMain.handle('git:worktree', async (_ev, cwd) => {
     await rodar('git', ['-C', repo, 'worktree', 'add', destino, branch]);
   } catch (erro) {
     console.error('[worktree] não deu:', erro.message);
-    await rodar('git', ['-C', repo, 'switch', branch]).catch(() => {});
-    return { erro: 'git' };
+    // a pasta principal já largou a branch; se nem a volta der certo, o
+    // aviso precisa dizer que ela ficou na principal
+    const voltou = await rodar('git', ['-C', repo, 'switch', branch]).then(() => true, () => false);
+    return { erro: voltou ? 'git' : 'git-na-principal' };
   }
   console.log('[worktree]', branch, 'agora mora em', destino, '; origem foi pra', volta);
   return { caminho: destino, branch, volta };
+});
+
+// O caminho de volta: a worktree fecha e a pasta dela some do disco. A
+// branch continua existindo no repositório — o que morre é só a casa
+// emprestada. Só fecha com tudo commitado, e com confirmação na tela que
+// lista o que some junto sem estar no git.
+ipcMain.handle('git:fechar-worktree', async (ev, cwd) => {
+  if (!cwd || !path.isAbsolute(cwd)) return { erro: 'pasta' };
+  let repo, topo, branch;
+  try {
+    const saida = await rodar('git', ['-C', cwd, 'rev-parse', '--path-format=absolute',
+      '--git-common-dir', '--show-toplevel', '--abbrev-ref', 'HEAD']);
+    const [comum, t, atual] = saida.trim().split('\n');
+    repo = path.dirname(comum);
+    topo = t;
+    branch = atual;
+  } catch { return { erro: 'fora-de-repo' }; }
+  if (topo === repo) return { erro: 'nao-e-worktree' }; // a pasta principal não se fecha
+
+  // Mudança sem commit iria pro lixo junto com a pasta: não fecha. O que o
+  // git ignora (.env, node_modules, banco local) não trava o git, mas some
+  // junto com a pasta — por isso entra na lista da confirmação.
+  const situacao = await rodar('git', ['-C', topo, 'status', '--porcelain', '-z', '--ignored']).catch(() => null);
+  if (situacao === null) return { erro: 'mexido' };
+  const itens = situacao.split('\0').filter(Boolean);
+  if (itens.some((i) => !i.startsWith('!! '))) return { erro: 'mexido' };
+  const ignorados = itens.map((i) => i.slice(3));
+  const MOSTRAR = 10;
+  const somemJunto = ignorados.length
+    ? '\n\nSomem junto, porque o git ignora e não guarda:\n' + ignorados.slice(0, MOSTRAR).join('\n')
+      + (ignorados.length > MOSTRAR ? `\n…e mais ${ignorados.length - MOSTRAR}` : '')
+    : '';
+
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(ev.sender), {
+    type: 'warning',
+    title: 'Fechar worktree',
+    message: `Fechar a worktree "${path.basename(topo)}"?`,
+    detail: `A pasta some do disco. A branch ${branch} continua existindo no repositório.${somemJunto}`,
+    buttons: ['Fechar worktree', 'Cancelar'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response !== 0) return { cancelado: true };
+
+  try {
+    await rodar('git', ['-C', repo, 'worktree', 'remove', topo]);
+  } catch (erro) {
+    console.error('[worktree] não fechou:', erro.message);
+    return { erro: 'git' };
+  }
+  console.log('[worktree]', topo, 'fechada; a branch', branch, 'ficou no repositório');
+  return { ok: true, pasta: topo };
 });
 
 // bigorna-feat, e se já existir, bigorna-feat-2, bigorna-feat-3…
@@ -474,6 +529,7 @@ ipcMain.handle('fs:watch', (_ev, dir) => {
     v.on('error', () => { // a pasta sumiu: o vigia morre junto
       clearTimeout(vigias.get(dir)?.espera);
       vigias.delete(dir);
+      v.close(); // sem isso ele ficava zumbi até a limpeza de memória
     });
     vigias.set(dir, { vigia: v, espera: null });
   } catch { /* sem permissão ou pasta já era: segue sem vigia */ }
@@ -489,6 +545,15 @@ ipcMain.on('fs:unwatch', (_ev, dir) => {
   vigias.delete(dir);
 });
 
+// A tela pergunta se um caminho existe (pros links do terminal): responde
+// se existe, se é pasta e o caminho limpo (sem ".." no meio), sem abrir nada.
+ipcMain.handle('fs:existe', async (_ev, caminho) => {
+  if (typeof caminho !== 'string' || !path.isAbsolute(caminho)) return { existe: false };
+  const limpo = path.normalize(caminho);
+  const info = await fs.stat(limpo).catch(() => null);
+  return { existe: !!info, pasta: !!info && info.isDirectory(), caminho: limpo };
+});
+
 ipcMain.handle('fs:read', async (_ev, arquivo) => {
   const info = await fs.stat(arquivo);
   if (info.size > 2 * 1024 * 1024) return { erro: 'grande' };
@@ -502,12 +567,21 @@ ipcMain.handle('fs:read', async (_ev, arquivo) => {
 // nele depois do mtime que a janela conhece, não grava por cima calado:
 // responde que mudou e a janela decide.
 ipcMain.handle('fs:write', async (_ev, arquivo, conteudo, mtimeConhecido) => {
-  const antes = await fs.stat(arquivo).catch(() => null);
+  if (!podeMexer(arquivo)) return { erro: 'caminho' }; // a mesma trava das outras escritas
+  // Atalho (symlink) grava no arquivo de verdade que ele aponta: a troca em
+  // cima do atalho mataria ele e deixaria o alvo intacto, desatualizado.
+  const alvo = await fs.realpath(arquivo).catch(() => arquivo);
+  const antes = await fs.stat(alvo).catch(() => null);
   if (mtimeConhecido != null && antes && antes.mtimeMs > mtimeConhecido) return { erro: 'mudou-por-fora' };
-  const aoLado = path.join(path.dirname(arquivo), '.' + path.basename(arquivo) + '.bigorna~');
-  await fs.writeFile(aoLado, conteudo, { encoding: 'utf8', mode: antes ? antes.mode & 0o777 : 0o644 });
-  await fs.rename(aoLado, arquivo);
-  return { mtime: (await fs.stat(arquivo).catch(() => null))?.mtimeMs ?? null };
+  const aoLado = path.join(path.dirname(alvo), '.' + path.basename(alvo) + '.bigorna~');
+  try {
+    await fs.writeFile(aoLado, conteudo, { encoding: 'utf8', mode: antes ? antes.mode & 0o777 : 0o644 });
+    await fs.rename(aoLado, alvo);
+  } catch (erro) {
+    await fs.rm(aoLado, { force: true }).catch(() => {}); // o ao-lado não fica largado
+    throw erro;
+  }
+  return { mtime: (await fs.stat(alvo).catch(() => null))?.mtimeMs ?? null };
 });
 
 // ---------- Menu do botão direito na lateral (igual ao do Dolphin) ----------
@@ -617,6 +691,8 @@ const ehAudio = (tipo) => tipo.startsWith('audio/') || tipo === 'application/ogg
 // Ícones das opções do menu: os mesmos que o Dolphin usa.
 const ICONES_DO_MENU = {
   abrirCom: 'document-open',
+  terminal: 'utilities-terminal',
+  copiarCaminho: 'edit-copy',
   criarNovo: 'list-add',
   pasta: 'folder-new',
   arquivo: 'document-new',
@@ -644,6 +720,7 @@ ipcMain.handle('menu:opcoes', async (_ev, caminho, ehPasta) => {
 // Ícones do menu do botão direito na aba do terminal.
 const ICONES_DA_ABA = {
   worktree: 'folder-new',
+  fecharWorktree: 'user-trash',
   renomear: 'edit-rename',
   fechar: 'tab-close',
   lado: 'view-split-left-right',
@@ -660,7 +737,17 @@ ipcMain.handle('menu:icones-da-aba', async () => {
 });
 
 ipcMain.on('acao:abrir-com', (_ev, programa, caminho) => {
-  if (programa.endsWith('.desktop') && path.isAbsolute(caminho)) soltar('gio', ['launch', programa, caminho]);
+  // o .desktop também precisa ser caminho completo, como tudo que vem da tela
+  if (typeof programa === 'string' && path.isAbsolute(programa) && programa.endsWith('.desktop')
+    && typeof caminho === 'string' && path.isAbsolute(caminho)) {
+    soltar('gio', ['launch', programa, caminho]);
+  }
+});
+
+// Link escrito no terminal, aberto com Ctrl+clique: vai pro navegador do
+// sistema. Só http e https — file:// e outros esquemas não saem daqui.
+ipcMain.on('acao:abrir-link', (_ev, url) => {
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) sistema.openExternal(url);
 });
 
 ipcMain.on('acao:transcrever', (_ev, caminho) => {
@@ -734,6 +821,33 @@ ipcMain.handle('fs:zip', async (_ev, caminho) => {
   return { ok: true, zip: path.join(pasta, zip) };
 });
 
+// ---------- Ajustes: o caderninho de preferências da Bigorna ----------
+// Um JSON pequeno na pasta de configuração. A janela lê na partida e manda
+// gravar quando algo muda; a gravação é em dois tempos, como a do editor,
+// pra queda no meio não deixar o caderninho pela metade.
+
+const arquivoDeAjustes = () => path.join(app.getPath('userData'), 'ajustes.json');
+
+ipcMain.handle('ajustes:ler', async () => {
+  try {
+    return JSON.parse(await fs.readFile(arquivoDeAjustes(), 'utf8'));
+  } catch {
+    return {}; // primeiro uso, ou caderninho rabiscado: começa em branco
+  }
+});
+
+ipcMain.on('ajustes:gravar', async (_ev, ajustes) => {
+  if (typeof ajustes !== 'object' || !ajustes) return;
+  const arquivo = arquivoDeAjustes();
+  const aoLado = arquivo + '~';
+  try {
+    await fs.writeFile(aoLado, JSON.stringify(ajustes, null, 2) + '\n');
+    await fs.rename(aoLado, arquivo);
+  } catch (erro) {
+    console.error('[ajustes] não gravei:', erro.message);
+  }
+});
+
 // ---------- Jogos: o emulador roda dentro da própria janela ----------
 // Cada console tem seu emulador em WebAssembly (o "core"). A Bigorna baixa o
 // core uma vez e guarda na pasta de configuração dela; da segunda vez em
@@ -751,16 +865,17 @@ ipcMain.handle('jogo:core', async (_ev, core) => {
   const jaTem = await Promise.all([js, wasm].map((f) => fs.stat(f).then(() => true, () => false)));
 
   if (!jaTem.every(Boolean)) {
+    const zip = path.join(pasta, `${core}.zip`);
     try {
       await fs.mkdir(pasta, { recursive: true });
       const resposta = await net.fetch(`${ENDERECO_DOS_CORES}/${core}_libretro.zip`);
       if (!resposta.ok) throw new Error(resposta.status);
-      const zip = path.join(pasta, `${core}.zip`);
       await fs.writeFile(zip, Buffer.from(await resposta.arrayBuffer()));
       await rodar('unzip', ['-o', '-q', zip, '-d', pasta]);
-      await fs.rm(zip, { force: true });
     } catch {
       return { erro: 'baixar' };
+    } finally {
+      await fs.rm(zip, { force: true }).catch(() => {}); // zip pela metade não fica
     }
   }
   return { js: await fs.readFile(js), wasm: await fs.readFile(wasm) };
