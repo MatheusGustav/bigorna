@@ -547,6 +547,47 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   font-weight: 600;
 }
 
+/* ---------- busca no terminal (Ctrl+Shift+F) ---------- */
+#busca {
+  position: absolute;
+  top: 4px;
+  right: 12px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--fundo-2);
+  border: 1px solid var(--borda-2);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+#busca-texto {
+  width: 170px;
+  font: inherit;
+  color: var(--texto);
+  background: var(--fundo);
+  border: 1px solid #555;
+  padding: 2px 5px;
+  outline: none;
+}
+#busca-conta {
+  color: var(--texto-fraco);
+  font-size: 11px;
+  min-width: 34px;
+  text-align: center;
+}
+#busca button {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--texto-fraco);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+#busca button:hover { color: var(--texto); border-color: var(--borda-2); }
+#busca .x { cursor: pointer; color: #5a5a5a; font-size: 17px; line-height: 1; padding: 0 2px; }
+#busca .x:hover { color: var(--texto); }
+
 /* ---------- aviso curto no canto de baixo ---------- */
 #aviso {
   position: fixed;

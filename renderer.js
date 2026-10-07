@@ -1,4 +1,4 @@
-/* global Terminal, FitAddon, WebglAddon, require, monaco */
+/* global Terminal, FitAddon, WebglAddon, SearchAddon, require, monaco */
 
 const $ = (id) => document.getElementById(id);
 
@@ -603,8 +603,21 @@ async function criarTerminal(pasta, col) {
     console.warn('[terminal] sem WebGL, usando o desenho comum:', erro);
   }
 
-  // Nenhum atalho próprio: tudo vai pro bash. As duas únicas exceções são as
-  // mesmas do Konsole: Ctrl+Shift+C copia e Ctrl+Shift+V cola.
+  // A busca (Ctrl+Shift+F) é de cada terminal: cada um guarda o seu texto
+  // marcado. O contador da caixinha só obedece ao dono da busca aberta.
+  const busca = new SearchAddon.SearchAddon();
+  term.loadAddon(busca);
+  busca.onDidChangeResults(({ resultIndex, resultCount }) => {
+    if (buscaNo !== id) return;
+    $('busca-conta').textContent =
+      resultCount < 0 ? 'muitas' :
+      resultCount === 0 ? 'nada' :
+      resultIndex < 0 ? String(resultCount) : `${resultIndex + 1}/${resultCount}`;
+  });
+
+  // Nenhum atalho próprio: tudo vai pro bash. As únicas exceções são as
+  // mesmas do Konsole: Ctrl+Shift+C copia, Ctrl+Shift+V cola e
+  // Ctrl+Shift+F abre a busca.
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true;
     if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') {
@@ -618,12 +631,17 @@ async function criarTerminal(pasta, col) {
       ev.preventDefault();
       return false;
     }
+    if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyF') {
+      abrirBusca(id);
+      ev.preventDefault();
+      return false;
+    }
     return true;
   });
 
   // Entra no mapa antes do bash nascer, senão a primeira letra do prompt
   // poderia chegar sem ter quem a receba.
-  terminais.set(id, { term, fit, caixa, info: null, nome: null, col });
+  terminais.set(id, { term, fit, caixa, busca, info: null, nome: null, col });
   term.onData((data) => window.api.ptyWrite(id, data));
 
   fit.fit();
@@ -651,6 +669,7 @@ function mostrarNaColuna(id) {
 function ativarTerminal(id) {
   const t = terminais.get(id);
   if (!t) return;
+  if (buscaNo !== null && buscaNo !== id) fecharBusca(true); // a busca era de outro terminal
   terminalAtivo = id;
   colunaAtiva = t.col;
   mostrarNaColuna(id);
@@ -662,6 +681,7 @@ function ativarTerminal(id) {
 function fecharTerminal(id, jaEncerrou) {
   const t = terminais.get(id);
   if (!t) return;
+  if (buscaNo === id) fecharBusca(true); // a caixinha sai antes da caixa do terminal morrer
   terminais.delete(id);
   if (!jaEncerrou) window.api.ptyKill(id);
   t.term.dispose();
@@ -809,6 +829,73 @@ function desenharAbas() {
   arrumarFliperama(); // em pé ou deitado, conforme a coluna dele tenha terminal
   atualizarFora(); // o terminal da vez pode ter mudado de pasta, ou outro virou a vez
 }
+
+// ============================================================
+// BUSCA NO TERMINAL (Ctrl+Shift+F, igual ao Konsole)
+// ============================================================
+// A caixinha mora dentro da caixa do terminal da vez (canto de cima, à
+// direita) e as ocorrências ficam marcadas na tela. Enter vai pra próxima,
+// Shift+Enter volta, Esc fecha e devolve o teclado pro terminal.
+
+// Marcas em cinza, do jeito da casa: a ocorrência da vez um tom mais clara.
+const DECORACOES_DA_BUSCA = {
+  matchBackground: '#333333',
+  matchOverviewRuler: '#555555',
+  activeMatchBackground: '#6d6d6d',
+  activeMatchColorOverviewRuler: '#9a9a9a',
+};
+
+let buscaNo = null; // id do terminal dono da busca aberta, se houver
+
+function abrirBusca(id) {
+  const t = terminais.get(id);
+  if (!t) return;
+  if (buscaNo !== null && buscaNo !== id) fecharBusca(true);
+  buscaNo = id;
+  t.caixa.appendChild($('busca')); // acompanha o terminal se ele mudar de coluna
+  $('busca').hidden = false;
+  $('busca-texto').focus();
+  $('busca-texto').select();
+}
+
+// semFoco: fechar sem devolver o teclado (o terminal está indo embora, ou
+// outro já o tomou).
+function fecharBusca(semFoco) {
+  if (buscaNo === null) return;
+  const t = terminais.get(buscaNo);
+  buscaNo = null;
+  $('busca').hidden = true;
+  $('busca-conta').textContent = '';
+  document.body.appendChild($('busca')); // sai da caixa do terminal antes de ela morrer
+  if (!t) return;
+  t.busca.clearDecorations();
+  t.term.clearSelection();
+  if (!semFoco) t.term.focus();
+}
+
+// incremental: digitando, a ocorrência atual cresce em vez de pular pra outra.
+function procurar(adiante, incremental) {
+  const t = terminais.get(buscaNo);
+  if (!t) return;
+  const texto = $('busca-texto').value;
+  if (!texto) {
+    t.busca.clearDecorations();
+    $('busca-conta').textContent = '';
+    return;
+  }
+  const opcoes = { decorations: DECORACOES_DA_BUSCA, incremental };
+  if (adiante) t.busca.findNext(texto, opcoes);
+  else t.busca.findPrevious(texto, opcoes);
+}
+
+$('busca-texto').addEventListener('input', () => procurar(true, true));
+$('busca-texto').addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') procurar(!ev.shiftKey, false);
+  else if (ev.key === 'Escape') fecharBusca();
+});
+$('busca-prox').addEventListener('click', () => { procurar(true, false); $('busca-texto').focus(); });
+$('busca-ant').addEventListener('click', () => { procurar(false, false); $('busca-texto').focus(); });
+$('busca-fechar').addEventListener('click', () => fecharBusca());
 
 // ============================================================
 // LATERAL DE PASTAS
