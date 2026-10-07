@@ -31,7 +31,7 @@ Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico
 - **Editor do sistema**: é o programa padrão pra texto e código (os tipos estão em `build.linux.mimeTypes` do `package.json`; HTML fica com o navegador). Arquivo pedido vai pra janela já aberta que foi usada por último, trocando o que está no editor (decisão do Matheus); sem janela aberta, abre uma nova com o terminal na pasta dele. A entrega é por uma tomada única em `/run/user/<id>/bigorna`, que a janela em foco toma pra si ao ganhar o foco; quem entrega só vai embora com a confirmação de quem recebeu — sem confirmação, abre a própria janela.
 - **Ordem na lateral**: pastas primeiro, por nome; arquivos por ordem de chegada, o mais novo no fim — baixou agora, está no pé da pasta (decisão do Matheus). Chegada é a criação do arquivo, não a última mexida: editar não muda ninguém de lugar.
 - **Arrastar da lateral**: o item vai como arquivo de verdade, pelo arrasto nativo do sistema — solta no WhatsApp, no navegador, no Dolphin, em qualquer programa. Soltar num terminal da Bigorna (até arquivo vindo de fora) cola o caminho no prompt, entre aspas quando precisa, igual ao Konsole.
-- Botão direito na lateral: menu no estilo do Dolphin (abrir com, renomear, lixeira, zip, transcrever áudio…).
+- Botão direito na lateral: menu no estilo do Dolphin (abrir com, abrir terminal aqui, copiar caminho, renomear, lixeira, zip, transcrever áudio…). "Abrir terminal aqui" abre a aba na pasta clicada (no arquivo, na pasta dele); "Copiar caminho" põe o caminho completo na área de transferência.
 
 ## Avisos
 

@@ -1169,7 +1169,7 @@ function abrirSubmenu(itemPai, itens) {
 }
 
 function itensDoMenu(linha, opcoes) {
-  const { caminho } = linha.dados;
+  const { caminho, ehPasta } = linha.dados;
   const ic = opcoes.icones;
   return [
     {
@@ -1179,6 +1179,10 @@ function itensDoMenu(linha, opcoes) {
         ? opcoes.programas.map((p) => ({ texto: p.nome, icone: p.icone, acao: () => window.api.abrirCom(p.arquivo, caminho) }))
         : [{ texto: 'nenhum programa encontrado', desligado: true }],
     },
+    '-',
+    // Na pasta, o terminal abre nela; no arquivo, na pasta onde ele está.
+    { texto: 'Abrir terminal aqui', icone: ic.terminal, acao: () => criarTerminal(ehPasta ? caminho : pastaDe(caminho)) },
+    { texto: 'Copiar caminho', icone: ic.copiarCaminho, acao: () => window.api.copiar(caminho) },
     '-',
     {
       texto: 'Criar novo',
