@@ -734,6 +734,33 @@ ipcMain.handle('fs:zip', async (_ev, caminho) => {
   return { ok: true, zip: path.join(pasta, zip) };
 });
 
+// ---------- Ajustes: o caderninho de preferências da Bigorna ----------
+// Um JSON pequeno na pasta de configuração. A janela lê na partida e manda
+// gravar quando algo muda; a gravação é em dois tempos, como a do editor,
+// pra queda no meio não deixar o caderninho pela metade.
+
+const arquivoDeAjustes = () => path.join(app.getPath('userData'), 'ajustes.json');
+
+ipcMain.handle('ajustes:ler', async () => {
+  try {
+    return JSON.parse(await fs.readFile(arquivoDeAjustes(), 'utf8'));
+  } catch {
+    return {}; // primeiro uso, ou caderninho rabiscado: começa em branco
+  }
+});
+
+ipcMain.on('ajustes:gravar', async (_ev, ajustes) => {
+  if (typeof ajustes !== 'object' || !ajustes) return;
+  const arquivo = arquivoDeAjustes();
+  const aoLado = arquivo + '~';
+  try {
+    await fs.writeFile(aoLado, JSON.stringify(ajustes, null, 2) + '\n');
+    await fs.rename(aoLado, arquivo);
+  } catch (erro) {
+    console.error('[ajustes] não gravei:', erro.message);
+  }
+});
+
 // ---------- Jogos: o emulador roda dentro da própria janela ----------
 // Cada console tem seu emulador em WebAssembly (o "core"). A Bigorna baixa o
 // core uma vez e guarda na pasta de configuração dela; da segunda vez em
