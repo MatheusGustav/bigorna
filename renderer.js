@@ -605,6 +605,11 @@ async function criarTerminal(pasta, col) {
   $('shell-fim').hidden = true;
   if (!col || !linhaDe(col)) col = (colunaAtiva && linhaDe(colunaAtiva) && colunaAtiva) || todasAsColunas()[0] || criarColuna();
 
+  // Sem pasta pedida (+, duplo clique na barra), a aba nova nasce na pasta
+  // do terminal à mostra na coluna — igual ao Konsole, que segue a pasta
+  // atual. Sem nenhum terminal aberto, vale a casa (ou o pedido de fora).
+  if (pasta === undefined) pasta = terminais.get(col.ativo)?.info?.cwd ?? terminalDaVez()?.info?.cwd;
+
   const id = proximoTerminal++;
   const caixa = document.createElement('div');
   caixa.className = 'terminal-caixa';
