@@ -603,8 +603,9 @@ async function criarTerminal(pasta, col) {
     console.warn('[terminal] sem WebGL, usando o desenho comum:', erro);
   }
 
-  // Nenhum atalho próprio: tudo vai pro bash. As duas únicas exceções são as
-  // mesmas do Konsole: Ctrl+Shift+C copia e Ctrl+Shift+V cola.
+  // Nenhum atalho próprio: tudo vai pro bash. As únicas exceções são as
+  // mesmas do Konsole: Ctrl+Shift+C copia, Ctrl+Shift+V cola, Ctrl+Shift+T
+  // abre outro terminal na coluna e Ctrl+Shift+K limpa o rolo da tela.
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true;
     if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') {
@@ -615,6 +616,16 @@ async function criarTerminal(pasta, col) {
     }
     if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyV') {
       window.api.colar().then((t) => { if (t) window.api.ptyWrite(id, t); });
+      ev.preventDefault();
+      return false;
+    }
+    if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyT') {
+      criarTerminal(undefined, terminais.get(id)?.col);
+      ev.preventDefault();
+      return false;
+    }
+    if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyK') {
+      term.clear();
       ev.preventDefault();
       return false;
     }
