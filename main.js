@@ -340,8 +340,10 @@ ipcMain.handle('git:worktree', async (_ev, cwd) => {
     await rodar('git', ['-C', repo, 'worktree', 'add', destino, branch]);
   } catch (erro) {
     console.error('[worktree] não deu:', erro.message);
-    await rodar('git', ['-C', repo, 'switch', branch]).catch(() => {});
-    return { erro: 'git' };
+    // a pasta principal já largou a branch; se nem a volta der certo, o
+    // aviso precisa dizer que ela ficou na principal
+    const voltou = await rodar('git', ['-C', repo, 'switch', branch]).then(() => true, () => false);
+    return { erro: voltou ? 'git' : 'git-na-principal' };
   }
   console.log('[worktree]', branch, 'agora mora em', destino, '; origem foi pra', volta);
   return { caminho: destino, branch, volta };
@@ -474,6 +476,7 @@ ipcMain.handle('fs:watch', (_ev, dir) => {
     v.on('error', () => { // a pasta sumiu: o vigia morre junto
       clearTimeout(vigias.get(dir)?.espera);
       vigias.delete(dir);
+      v.close(); // sem isso ele ficava zumbi até a limpeza de memória
     });
     vigias.set(dir, { vigia: v, espera: null });
   } catch { /* sem permissão ou pasta já era: segue sem vigia */ }
@@ -502,12 +505,21 @@ ipcMain.handle('fs:read', async (_ev, arquivo) => {
 // nele depois do mtime que a janela conhece, não grava por cima calado:
 // responde que mudou e a janela decide.
 ipcMain.handle('fs:write', async (_ev, arquivo, conteudo, mtimeConhecido) => {
-  const antes = await fs.stat(arquivo).catch(() => null);
+  if (!podeMexer(arquivo)) return { erro: 'caminho' }; // a mesma trava das outras escritas
+  // Atalho (symlink) grava no arquivo de verdade que ele aponta: a troca em
+  // cima do atalho mataria ele e deixaria o alvo intacto, desatualizado.
+  const alvo = await fs.realpath(arquivo).catch(() => arquivo);
+  const antes = await fs.stat(alvo).catch(() => null);
   if (mtimeConhecido != null && antes && antes.mtimeMs > mtimeConhecido) return { erro: 'mudou-por-fora' };
-  const aoLado = path.join(path.dirname(arquivo), '.' + path.basename(arquivo) + '.bigorna~');
-  await fs.writeFile(aoLado, conteudo, { encoding: 'utf8', mode: antes ? antes.mode & 0o777 : 0o644 });
-  await fs.rename(aoLado, arquivo);
-  return { mtime: (await fs.stat(arquivo).catch(() => null))?.mtimeMs ?? null };
+  const aoLado = path.join(path.dirname(alvo), '.' + path.basename(alvo) + '.bigorna~');
+  try {
+    await fs.writeFile(aoLado, conteudo, { encoding: 'utf8', mode: antes ? antes.mode & 0o777 : 0o644 });
+    await fs.rename(aoLado, alvo);
+  } catch (erro) {
+    await fs.rm(aoLado, { force: true }).catch(() => {}); // o ao-lado não fica largado
+    throw erro;
+  }
+  return { mtime: (await fs.stat(alvo).catch(() => null))?.mtimeMs ?? null };
 });
 
 // ---------- Menu do botão direito na lateral (igual ao do Dolphin) ----------
@@ -660,7 +672,11 @@ ipcMain.handle('menu:icones-da-aba', async () => {
 });
 
 ipcMain.on('acao:abrir-com', (_ev, programa, caminho) => {
-  if (programa.endsWith('.desktop') && path.isAbsolute(caminho)) soltar('gio', ['launch', programa, caminho]);
+  // o .desktop também precisa ser caminho completo, como tudo que vem da tela
+  if (typeof programa === 'string' && path.isAbsolute(programa) && programa.endsWith('.desktop')
+    && typeof caminho === 'string' && path.isAbsolute(caminho)) {
+    soltar('gio', ['launch', programa, caminho]);
+  }
 });
 
 ipcMain.on('acao:transcrever', (_ev, caminho) => {
@@ -751,16 +767,17 @@ ipcMain.handle('jogo:core', async (_ev, core) => {
   const jaTem = await Promise.all([js, wasm].map((f) => fs.stat(f).then(() => true, () => false)));
 
   if (!jaTem.every(Boolean)) {
+    const zip = path.join(pasta, `${core}.zip`);
     try {
       await fs.mkdir(pasta, { recursive: true });
       const resposta = await net.fetch(`${ENDERECO_DOS_CORES}/${core}_libretro.zip`);
       if (!resposta.ok) throw new Error(resposta.status);
-      const zip = path.join(pasta, `${core}.zip`);
       await fs.writeFile(zip, Buffer.from(await resposta.arrayBuffer()));
       await rodar('unzip', ['-o', '-q', zip, '-d', pasta]);
-      await fs.rm(zip, { force: true });
     } catch {
       return { erro: 'baixar' };
+    } finally {
+      await fs.rm(zip, { force: true }).catch(() => {}); // zip pela metade não fica
     }
   }
   return { js: await fs.readFile(js), wasm: await fs.readFile(wasm) };

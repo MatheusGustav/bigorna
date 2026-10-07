@@ -1222,6 +1222,7 @@ const ERRO_DA_WORKTREE = {
   'ja-e-a-principal': 'essa é a branch da pasta principal',
   'sem-main': 'esse repositório não tem main nem master',
   mexido: 'tem arquivo mexido sem commit; a branch não pode mudar de casa',
+  'git-na-principal': 'não deu — e a pasta principal ficou na main/master; confere a branch lá',
 };
 
 let iconesDaAba = null; // vêm do sistema uma vez só

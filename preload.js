@@ -56,5 +56,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // área de transferência (pro Ctrl+Shift+C/V do terminal, igual ao Konsole)
   copiar: (texto) => clipboard.writeText(texto),
-  colar: () => clipboard.readText(),
+  // async de propósito: a tela faz .then() — sem a promessa, o Ctrl+Shift+V
+  // quebrava com "erro interno" e não colava nada
+  colar: async () => clipboard.readText(),
 });
