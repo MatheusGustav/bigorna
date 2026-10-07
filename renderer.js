@@ -993,6 +993,11 @@ function desenharAbas() {
   }
   arrumarFliperama(); // em pé ou deitado, conforme a coluna dele tenha terminal
   atualizarFora(); // o terminal da vez pode ter mudado de pasta, ou outro virou a vez
+
+  // O título da janela acompanha a aba da vez: no alt-tab e na barra de
+  // tarefas dá pra saber qual Bigorna está em quê.
+  const daVez = terminalDaVez();
+  document.title = daVez && daVez.info ? tituloDaAba(daVez) + ' — bigorna' : 'bigorna';
 }
 
 // Clicar na etiqueta do grupo abre a lateral e desce até a pasta do
