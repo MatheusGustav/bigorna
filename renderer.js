@@ -1659,6 +1659,7 @@ function visorNaFrente(caminho) {
 async function abrirMidia(caminho, tipo) {
   limparVisor();
   visorNaFrente(caminho);
+  ultimaMidia = caminho; // pro botão do visor no trilho reabrir
   const alvo = $('visor');
 
   const endereco = enderecoDoArquivo(caminho);
@@ -2192,6 +2193,7 @@ function atualizarTrilho() {
 }
 
 let ultimoTexto = null; // o último arquivo de texto aberto, pro botão do editor reabrir
+let ultimaMidia = null; // a última mídia aberta, pro botão do visor reabrir
 
 // Editor: ligado, fecha o arquivo; desligado, reabre o último texto.
 $('btn-editor').addEventListener('click', () => {
@@ -2200,10 +2202,11 @@ $('btn-editor').addEventListener('click', () => {
   else avisar('clique num arquivo de texto na lateral');
 });
 
-// Visor: ligado, fecha a mídia; desligado, só diz de onde ela vem.
+// Visor: ligado, fecha a mídia; desligado, reabre a última (como o editor).
 $('btn-visor').addEventListener('click', () => {
   if ($('btn-visor').classList.contains('ligada')) return fecharArquivo();
-  avisar('clique numa imagem, som, vídeo ou PDF na lateral');
+  if (ultimaMidia) abrirArquivo(ultimaMidia);
+  else avisar('clique numa imagem, som, vídeo ou PDF na lateral');
 });
 
 // Fliperama: desligado, liga o videogame; ligado, sai guardando o ponto.
