@@ -647,6 +647,8 @@ const ICONES_DA_ABA = {
   renomear: 'edit-rename',
   fechar: 'tab-close',
   lado: 'view-split-left-right',
+  embaixo: 'view-split-top-bottom',
+  zoom: 'view-fullscreen',
   esquerda: 'go-previous',
   direita: 'go-next',
 };

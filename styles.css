@@ -81,7 +81,6 @@ button { font: inherit; }
   width: 46px;
   flex: none;
   position: relative;
-  z-index: 3; /* a lateral fechada desliza pra trás dele, não por cima */
   margin: 11px 0 8px 6px;
   background: var(--fundo);
   border: 1px solid var(--borda-2); /* a mesma moldura das outras peças */
@@ -151,20 +150,28 @@ button { font: inherit; }
   color: var(--brasa);
 }
 
-/* ---------- lateral de pastas: desliza ao abrir e fechar, largura ajustável ---------- */
+/* ---------- lateral de pastas: se dobra ao fechar, largura ajustável ---------- */
 #lateral {
   --largura: 240px;
   width: var(--largura);
-  min-width: var(--largura);
+  min-width: 0;
+  flex: none;
   position: relative;
   margin: 11px 0 8px 6px;
   background: var(--fundo);
   border: 1px solid var(--borda-2);
   display: flex;
   flex-direction: column;
-  transition: margin-left 0.18s ease;
+  transition: width 0.18s ease;
 }
-#lateral.fechada { margin-left: calc(-1 * var(--largura) - 14px); }
+/* fechada ela se dobra até sumir, sem passar por trás do trilho; o clip
+   segura o que não coube e o invisível no fim apaga até a moldura */
+#lateral.fechada {
+  width: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: width 0.18s ease, visibility 0s 0.18s;
+}
 #lateral.arrastando { transition: none; }
 #lateral.fechada + #divisor-lateral { display: none; }
 
@@ -222,8 +229,6 @@ button { font: inherit; }
   flex-direction: column;
 }
 #corpo.sem-terminal #editor-area { margin-right: 0; }
-/* a lateral fechada não deixa a peça colada no trilho */
-#lateral.fechada ~ #editor-area { margin-left: 6px; }
 /* sem terminal na tela (Ctrl+J), o arquivo fica com tudo */
 #corpo.sem-terminal #editor-area { width: auto !important; flex: 1; }
 
@@ -389,24 +394,31 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   display: flex;
   flex-direction: column;
 }
-/* sem lateral nem arquivo, o terminal também não cola no trilho */
-#lateral.fechada ~ #terminal-area { margin-left: 6px; }
-#lateral:not(.fechada) ~ #editor-area[hidden] ~ #terminal-area { margin-left: 0; }
+/* a lateral fechada ainda ocupa a margem dela, então nada cola no trilho */
 
-/* ---------- colunas de terminais lado a lado ---------- */
+/* ---------- a grade de terminais: linhas de colunas ---------- */
 #colunas {
   flex: 1;
   min-height: 0;
   display: flex;
-  flex-direction: column; /* linhas de colunas: até 3 por linha */
+  flex-direction: column; /* as linhas, de cima pra baixo */
 }
 .linha {
   flex: 1 1 0;
   min-height: 0;
   display: flex;
   align-items: stretch;
+  overflow: hidden; /* colunas demais não vazam da janela */
 }
-.linha + .linha .coluna { margin-top: 1px; } /* a linha de cima já deixou o respiro */
+.divisa-entre-linhas {
+  height: 6px;
+  flex: none;
+  cursor: row-resize;
+}
+.divisa-entre-linhas:hover { background: #1a1a1a; }
+/* zoom: a coluna marcada toma a área inteira; as outras esperam escondidas */
+#colunas.zoom > .linha:not(.tem-zoom), #colunas.zoom > .divisa-entre-linhas { display: none; }
+.linha.tem-zoom > .coluna:not(.zoom), .linha.tem-zoom > .divisa-coluna { display: none; }
 .coluna {
   flex: 1 1 0;
   min-width: 120px;
