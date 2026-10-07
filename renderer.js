@@ -1,4 +1,4 @@
-/* global Terminal, FitAddon, WebglAddon, require, monaco */
+/* global Terminal, FitAddon, WebglAddon, WebLinksAddon, require, monaco */
 
 const $ = (id) => document.getElementById(id);
 
@@ -602,6 +602,13 @@ async function criarTerminal(pasta, col) {
   } catch (erro) {
     console.warn('[terminal] sem WebGL, usando o desenho comum:', erro);
   }
+
+  // Endereço escrito na tela vira link: passando o mouse ele se sublinha, e
+  // Ctrl+clique abre no navegador. Clique simples continua sendo só clique,
+  // senão selecionar texto perto de um link abriria página sem querer.
+  term.loadAddon(new WebLinksAddon.WebLinksAddon((ev, url) => {
+    if (ev.ctrlKey) window.api.abrirLink(url);
+  }));
 
   // Nenhum atalho próprio: tudo vai pro bash. As duas únicas exceções são as
   // mesmas do Konsole: Ctrl+Shift+C copia e Ctrl+Shift+V cola.
