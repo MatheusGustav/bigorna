@@ -629,6 +629,8 @@ const ehAudio = (tipo) => tipo.startsWith('audio/') || tipo === 'application/ogg
 // Ícones das opções do menu: os mesmos que o Dolphin usa.
 const ICONES_DO_MENU = {
   abrirCom: 'document-open',
+  terminal: 'utilities-terminal',
+  copiarCaminho: 'edit-copy',
   criarNovo: 'list-add',
   pasta: 'folder-new',
   arquivo: 'document-new',

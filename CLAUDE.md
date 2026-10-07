@@ -33,7 +33,7 @@ Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico
 - O botão **ocultos** na linha de cima da lateral esconde e mostra os arquivos de ponto, nas duas metades (riscado = escondidos). Só muda a tela, e vale só pra sessão: abrir de novo volta mostrando.
 - **Ordem na lateral**: pastas primeiro, por nome; arquivos por ordem de chegada, o mais novo no fim — baixou agora, está no pé da pasta (decisão do Matheus). Chegada é a criação do arquivo, não a última mexida: editar não muda ninguém de lugar.
 - **Arrastar da lateral**: o item vai como arquivo de verdade, pelo arrasto nativo do sistema — solta no WhatsApp, no navegador, no Dolphin, em qualquer programa. Soltar num terminal da Bigorna (até arquivo vindo de fora) cola o caminho no prompt, entre aspas quando precisa, igual ao Konsole.
-- Botão direito na lateral: menu no estilo do Dolphin (abrir com, renomear, lixeira, zip, transcrever áudio…).
+- Botão direito na lateral: menu no estilo do Dolphin (abrir com, abrir terminal aqui, copiar caminho, renomear, lixeira, zip, transcrever áudio…). "Abrir terminal aqui" abre a aba na pasta clicada (no arquivo, na pasta dele); "Copiar caminho" põe o caminho completo na área de transferência.
 
 ## Avisos
 
