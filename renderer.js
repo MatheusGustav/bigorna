@@ -1665,6 +1665,7 @@ async function abrirMidia(caminho, tipo) {
   let el;
   if (tipo === 'imagem') {
     el = document.createElement('img');
+    ligarZoomDaImagem(el);
   } else if (tipo === 'pdf') {
     el = document.createElement('iframe'); // o visor de PDF do próprio Chromium
   } else {
@@ -1696,6 +1697,59 @@ async function abrirMidia(caminho, tipo) {
 
   alvo.append(mostrado);
   atualizarTrilho(); // agora o visor tem o que acender
+}
+
+// ---------- zoom e arrasto na imagem do visor ----------
+// A rodinha aproxima e afasta, centrada no ponto do mouse; com a imagem
+// ampliada, arrastar move e o duplo clique volta ao tamanho de encaixe.
+// Tudo por transform, então a imagem original nunca é recarregada.
+function ligarZoomDaImagem(img) {
+  let escala = 1;
+  let x = 0;
+  let y = 0;
+  const aplicar = () => {
+    img.style.transform = escala === 1 ? '' : `translate(${x}px, ${y}px) scale(${escala})`;
+    img.style.cursor = escala === 1 ? '' : 'grab';
+  };
+  img.addEventListener('wheel', (ev) => {
+    ev.preventDefault();
+    const nova = Math.min(32, Math.max(1, escala * (ev.deltaY < 0 ? 1.25 : 0.8)));
+    if (nova === escala) return;
+    // o ponto embaixo do mouse fica parado: o deslocamento compensa a escala
+    const r = img.getBoundingClientRect();
+    const px = ev.clientX - (r.left + r.width / 2);
+    const py = ev.clientY - (r.top + r.height / 2);
+    const fator = nova / escala;
+    x += px * (1 - fator);
+    y += py * (1 - fator);
+    escala = nova;
+    if (escala === 1) x = y = 0; // de volta ao encaixe, de volta ao centro
+    aplicar();
+  });
+  img.addEventListener('mousedown', (ev) => {
+    if (escala === 1 || ev.button !== 0) return;
+    ev.preventDefault(); // sem isso o navegador arrastaria a imagem em si
+    const x0 = ev.clientX - x;
+    const y0 = ev.clientY - y;
+    img.style.cursor = 'grabbing';
+    const mover = (m) => {
+      x = m.clientX - x0;
+      y = m.clientY - y0;
+      aplicar();
+    };
+    const soltar = () => {
+      window.removeEventListener('mousemove', mover);
+      window.removeEventListener('mouseup', soltar);
+      aplicar();
+    };
+    window.addEventListener('mousemove', mover);
+    window.addEventListener('mouseup', soltar);
+  });
+  img.addEventListener('dblclick', () => {
+    escala = 1;
+    x = y = 0;
+    aplicar();
+  });
 }
 
 // ---------- Fliperama: o console mora na área dos terminais ----------

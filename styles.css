@@ -258,6 +258,7 @@ button { font: inherit; }
   align-items: center;
   justify-content: center;
   background: var(--fundo);
+  overflow: hidden; /* a imagem ampliada não vaza da moldura */
 }
 #visor img, #visor video {
   max-width: calc(100% - 28px);
