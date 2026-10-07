@@ -2171,12 +2171,7 @@ async function recarregarArquivoAberto() {
 // segura o fechar até este aviso (o beforeunload sozinho não espera o disco).
 window.addEventListener('beforeunload', salvarAgora);
 window.api.onVaiFechar(async () => {
-  // o arranjo das colunas vai junto da última gravação do editor
-  try {
-    await Promise.all([salvar(), window.api.guardarArranjo(arranjoDaTela()).catch(() => {})]);
-  } finally {
-    window.api.podeFechar();
-  }
+  try { await salvar(); } finally { window.api.podeFechar(); }
 });
 
 // ============================================================
@@ -2258,60 +2253,6 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
 $('divisor').addEventListener('dblclick', () => { $('editor-area').style.width = ''; });
 
 // ============================================================
-// O ARRANJO GUARDADO: fechar hoje, abrir amanhã igual
-// ============================================================
-// Ao fechar, a grade (linhas, colunas, tamanhos, a pasta e o nome de cada
-// terminal) vai pra pasta de configuração; a próxima abertura comum remonta
-// tudo. Abertura dirigida (-e, --workdir, arquivo ou pasta pedida) não
-// restaura — quem decide é o processo principal, que conhece o pedido.
-
-function arranjoDaTela() {
-  return {
-    versao: 1,
-    linhas: linhas.map((linha) => ({
-      altura: Number(linha.el.style.flexGrow) || null,
-      colunas: linha.colunas.filter((col) => idsDaColuna(col).length).map((col) => {
-        const ids = idsDaColuna(col);
-        return {
-          largura: Number(col.el.style.flexGrow) || null,
-          ativo: Math.max(0, ids.indexOf(col.ativo)),
-          terminais: ids.map((id) => {
-            const t = terminais.get(id);
-            return { pasta: (t.info && t.info.cwd) || null, nome: t.nome || null };
-          }),
-        };
-      }),
-    })).filter((l) => l.colunas.length),
-  };
-}
-
-async function restaurarArranjo(dados) {
-  try {
-    for (const l of dados.linhas.slice(0, 12)) {
-      if (!l || !Array.isArray(l.colunas) || !l.colunas.length) continue;
-      const linha = criarLinhaEm(linhas.length);
-      if (l.altura > 0) linha.el.style.flexGrow = l.altura;
-      for (const c of l.colunas.slice(0, 12)) {
-        if (!c || !Array.isArray(c.terminais) || !c.terminais.length) continue;
-        const col = criarColunaEm(linha, linha.colunas.length);
-        if (c.largura > 0) col.el.style.flexGrow = c.largura;
-        for (const info of c.terminais.slice(0, 20)) {
-          const id = await criarTerminal(typeof info?.pasta === 'string' ? info.pasta : undefined, col);
-          if (typeof info?.nome === 'string' && info.nome) terminais.get(id).nome = info.nome;
-        }
-        const ids = idsDaColuna(col);
-        mostrarNaColuna(ids[c.ativo] ?? ids[ids.length - 1]);
-      }
-      if (!linha.colunas.length) removerLinha(linha); // linha guardada sem nada de pé
-    }
-  } catch (erro) {
-    console.warn('[arranjo] não consegui restaurar:', erro);
-  }
-  if (!terminais.size) await criarTerminal(); // arranjo vazio ou quebrado: o de sempre
-  desenharAbas();
-}
-
-// ============================================================
 // PARTIDA
 // ============================================================
 
@@ -2331,10 +2272,7 @@ async function restaurarArranjo(dados) {
     await revelarPasta(pastaPedida, casa, $('arvore'));
     pastaPedida = null;
   }
-  // abertura comum volta no arranjo de ontem; dirigida abre só o pedido
-  const salvo = await window.api.lerArranjo().catch(() => null);
-  if (salvo && Array.isArray(salvo.linhas) && salvo.linhas.length) await restaurarArranjo(salvo);
-  else await criarTerminal();
+  await criarTerminal();
   atualizarTrilho();
   if (arquivo) await abrirPedido(arquivo);
 })();

@@ -31,10 +31,6 @@ contextBridge.exposeInMainWorld('api', {
   // fechar a janela espera a última gravação do editor
   onVaiFechar: (cb) => ipcRenderer.on('janela:vai-fechar', cb),
   podeFechar: () => ipcRenderer.send('janela:pode-fechar'),
-
-  // o arranjo das colunas e linhas: guardado ao fechar, relido na partida
-  guardarArranjo: (dados) => ipcRenderer.invoke('arranjo:guardar', dados),
-  lerArranjo: () => ipcRenderer.invoke('arranjo:ler'),
   // arrastar da lateral: o sistema leva o arquivo de verdade; e o caminho de
   // um File solto na janela (só o preload enxerga ele)
   arrastarArquivo: (caminho) => ipcRenderer.send('fs:arrastar', caminho),
