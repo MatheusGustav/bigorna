@@ -9,6 +9,7 @@ const $ = (id) => document.getElementById(id);
 const OPCOES_DO_TERMINAL = {
   fontFamily: '"JetBrains Mono", monospace',
   fontSize: 14,
+  allowProposedApi: true, // as marcas da busca usam a API "proposta" do xterm
   cursorBlink: true,
   scrollback: 10000,
   theme: {
