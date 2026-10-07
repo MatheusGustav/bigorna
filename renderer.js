@@ -877,13 +877,22 @@ function marcarAtivo(linha) {
   linha.classList.add('aberto-no-editor');
 }
 
+// Cada pasta tem uma geração de leitura: duas releituras da mesma pasta
+// podem se cruzar (os avisos do vigia chegam em rajada, pai e filho
+// separados), e a atrasada não pode escrever por cima da mais nova —
+// senão a lista ficava presa num pedaço de tela morto até reabrir.
+const geracaoDaPasta = new Map();
+
 async function montarPasta(dir, recipiente, nivel) {
+  const geracao = (geracaoDaPasta.get(dir) || 0) + 1;
+  geracaoDaPasta.set(dir, geracao);
   let itens;
   try {
     itens = await window.api.listDir(dir);
   } catch {
     return; // sem permissão de ler: deixa quieto
   }
+  if (geracaoDaPasta.get(dir) !== geracao) return; // outra releitura passou na frente
   window.api.vigiarPasta(dir); // mudou algo nela (até por fora), a lista relê
   const novas = document.createDocumentFragment();
   const reabrir = [];
@@ -918,7 +927,10 @@ async function montarPasta(dir, recipiente, nivel) {
   }
   // Troca tudo de uma vez: relendo uma pasta, a lista não pisca vazia.
   recipiente.replaceChildren(novas);
-  for (const linha of reabrir) await alternarPasta(linha, true);
+  for (const linha of reabrir) {
+    if (geracaoDaPasta.get(dir) !== geracao) return; // ficou velha no meio das filhas
+    await alternarPasta(linha, true);
+  }
 }
 
 async function alternarPasta(linha, abrir) {
@@ -1395,6 +1407,22 @@ async function renomear(linha) {
       pastasAbertas.delete(c);
       pastasAbertas.add(destino + c.slice(caminho.length));
     }
+  }
+  // As pastas já lidas e os vigias delas também mudam de endereço: o inotify
+  // segue a pasta pelo nome velho e avisava um caminho que não existe mais,
+  // enquanto o novo ficava sem ninguém olhando.
+  for (const [c, lida] of [...pastasLidas]) {
+    if (!dentroDe(c, caminho)) continue;
+    pastasLidas.delete(c);
+    window.api.desvigiarPasta(c);
+    const novoC = destino + c.slice(caminho.length);
+    pastasLidas.set(novoC, lida);
+    window.api.vigiarPasta(novoC);
+  }
+  if (dentroDe(pastaVigiadaDoArquivo, caminho)) {
+    window.api.desvigiarPasta(pastaVigiadaDoArquivo);
+    pastaVigiadaDoArquivo = destino + pastaVigiadaDoArquivo.slice(caminho.length);
+    window.api.vigiarPasta(pastaVigiadaDoArquivo);
   }
   if (dentroDe(arquivoAberto, caminho)) {
     arquivoAberto = destino + arquivoAberto.slice(caminho.length);
