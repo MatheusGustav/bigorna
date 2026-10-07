@@ -129,6 +129,22 @@ function criarColunaEm(linha, indice) {
     col.el.classList.add('arrastando');
   });
   abas.addEventListener('dragend', () => limparArrasto());
+
+  // Costumes do Konsole com o mouse: a rodinha na barra passa pelas abas da
+  // coluna (dando a volta no fim), e duplo clique na parte vazia abre outro
+  // terminal ali, como o + faria.
+  abas.addEventListener('wheel', (ev) => {
+    const ids = idsDaColuna(col);
+    if (ids.length < 2) return;
+    ev.preventDefault();
+    const passo = (ev.deltaY || ev.deltaX) > 0 ? 1 : -1;
+    const atual = ids.indexOf(col.ativo);
+    ativarTerminal(ids[(atual + passo + ids.length) % ids.length]);
+  });
+  abas.addEventListener('dblclick', (ev) => {
+    if (ev.target === abas || ev.target === col.listaEl) criarTerminal(undefined, col);
+  });
+
   col.terminaisEl = document.createElement('div');
   col.terminaisEl.className = 'terminais';
   col.el.append(abas, col.terminaisEl);
@@ -776,8 +792,15 @@ function abaDoTerminal(id) {
   });
   aba.appendChild(x);
   aba.addEventListener('click', () => ativarTerminal(id));
+  // clique do meio fecha o terminal, igual ao Konsole
+  aba.addEventListener('auxclick', (ev) => {
+    if (ev.button !== 1) return;
+    ev.preventDefault();
+    fecharTerminal(id);
+  });
   // duplo clique: a coluna do terminal toma a área inteira; de novo, volta
-  aba.addEventListener('dblclick', () => {
+  aba.addEventListener('dblclick', (ev) => {
+    ev.stopPropagation(); // senão a barra entenderia como "abrir outro terminal"
     const dono = terminais.get(id);
     if (dono) alternarZoom(dono.col);
   });
@@ -1800,6 +1823,12 @@ function abaDoFliperama() {
   });
   aba.appendChild(x);
   aba.addEventListener('click', () => fliperama.tela.focus());
+  // clique do meio sai do jogo (salvando o ponto), como nas abas de terminal
+  aba.addEventListener('auxclick', (ev) => {
+    if (ev.button !== 1) return;
+    ev.preventDefault();
+    fecharFliperama();
+  });
   return aba;
 }
 
