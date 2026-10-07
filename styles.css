@@ -213,6 +213,13 @@ button { font: inherit; }
   outline: none;
 }
 .item.oculto { color: var(--texto-fraco); }      /* arquivos que começam com ponto */
+/* o botão "ocultos" da linha de cima: riscado = os de ponto estão escondidos.
+   A pasta oculta esconde os filhos junto (a caixa deles vem logo depois dela). */
+#lateral .rot .btn { cursor: pointer; }
+#lateral .rot .btn:hover { color: var(--texto); }
+#btn-ocultos.riscado { text-decoration: line-through; }
+#lateral.sem-ocultos .item.oculto,
+#lateral.sem-ocultos .item.oculto + .filhos { display: none; }
 .item .icone { flex: none; width: 14px; height: 14px; }
 .filhos { display: none; }
 .filhos.expandida { display: block; }

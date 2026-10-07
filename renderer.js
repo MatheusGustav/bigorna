@@ -1043,6 +1043,14 @@ $('btn-lateral').addEventListener('click', () => {
   atualizarTrilho();
 });
 
+// O botão "ocultos" na linha das pastas esconde e mostra os arquivos de
+// ponto, nas duas metades da lateral. Só a tela muda (a lista continua
+// inteira por baixo), e o estado vale pra sessão: abrir de novo mostra.
+$('btn-ocultos').addEventListener('click', () => {
+  const sem = $('lateral').classList.toggle('sem-ocultos');
+  $('btn-ocultos').classList.toggle('riscado', sem);
+});
+
 // ============================================================
 // SOLTAR NO TERMINAL: arquivo (da lateral ou de fora) vira o caminho
 // no prompt, igual ao Konsole
