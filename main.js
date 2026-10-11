@@ -728,6 +728,8 @@ const ICONES_DA_ABA = {
   zoom: 'view-fullscreen',
   esquerda: 'go-previous',
   direita: 'go-next',
+  cima: 'go-up',
+  baixo: 'go-down',
 };
 
 ipcMain.handle('menu:icones-da-aba', async () => {

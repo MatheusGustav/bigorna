@@ -297,8 +297,8 @@ button { font: inherit; }
 }
 .toca-audio audio { width: 100%; }
 
-/* fliperama: o console mora na área dos terminais, numa coluna com aba
-   própria. Em pé (coluna só dele): prateleira | tela | atalhos, de cima pra
+/* fliperama: o console mora na área dos terminais, numa célula com aba
+   própria. Em pé (célula só dele): prateleira | tela | atalhos, de cima pra
    baixo. Deitado (metade de baixo, com terminal em cima): tela à esquerda,
    prateleira e atalhos empilhados à direita. */
 .fliperama {
@@ -310,10 +310,10 @@ button { font: inherit; }
   grid-template-areas: 'prat' 'jogo' 'atalhos';
   grid-template-rows: minmax(0, 1fr) auto auto;
 }
-/* na coluna inteira dele não há terminal pra mostrar; o respiro a mais em
+/* na célula inteira dele não há terminal pra mostrar; o respiro a mais em
    cima tira o rótulo da prateleira de baixo da aba */
-.coluna.fl-inteira .terminais { display: none; }
-.coluna.fl-inteira .fliperama { margin-top: 26px; }
+.celula.fl-inteira .terminais { display: none; }
+.celula.fl-inteira .fliperama { margin-top: 26px; }
 .fliperama.metade {
   flex: 0 0 42%; /* o tamanho de partida; a divisa arrasta */
   grid-template-areas: 'jogo prat' 'jogo atalhos';
@@ -419,7 +419,7 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
 }
 /* a lateral fechada ainda ocupa a margem dela, então nada cola no trilho */
 
-/* ---------- a grade de terminais: linhas de colunas ---------- */
+/* ---------- a grade de terminais: linhas de colunas, colunas de células ---------- */
 #colunas {
   flex: 1;
   min-height: 0;
@@ -439,26 +439,41 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   cursor: row-resize;
 }
 .divisa-entre-linhas:hover { background: #1a1a1a; }
-/* zoom: a coluna marcada toma a área inteira; as outras esperam escondidas */
+/* zoom: a célula marcada toma a área inteira; as outras esperam escondidas */
 #colunas.zoom > .linha:not(.tem-zoom), #colunas.zoom > .divisa-entre-linhas { display: none; }
-.linha.tem-zoom > .coluna:not(.zoom), .linha.tem-zoom > .divisa-coluna { display: none; }
+.linha.tem-zoom > .coluna:not(.tem-zoom), .linha.tem-zoom > .divisa-coluna { display: none; }
+.coluna.tem-zoom > .celula:not(.zoom), .coluna.tem-zoom > .divisa-celula { display: none; }
 .coluna {
   flex: 1 1 0;
   min-width: 120px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column; /* as células, empilhadas */
+  overflow: hidden; /* células demais não vazam da linha */
+}
+.celula {
+  flex: 1 1 0;
+  min-height: 120px;
   position: relative;
   margin: 11px 0 8px;
   border: 1px solid var(--borda-2);
   display: flex;
   flex-direction: column;
 }
-/* a coluna com o teclado tem a moldura na cor do repositório da aba ativa */
-.coluna.foco { border-color: var(--cor, var(--texto-fraco)); }
+/* a célula com o teclado tem a moldura na cor do repositório da aba ativa */
+.celula.foco { border-color: var(--cor, var(--texto-fraco)); }
 .divisa-coluna {
   width: 6px;
   flex: none;
   cursor: col-resize;
 }
 .divisa-coluna:hover { background: #1a1a1a; }
+.divisa-celula {
+  height: 6px;
+  flex: none;
+  cursor: row-resize;
+}
+.divisa-celula:hover { background: #1a1a1a; }
 
 /* ---------- abas dos terminais (estilo Konsole, grupos por repositório) ---------- */
 /* as abas ficam escritas em cima da linha da moldura, como o lazygit faz */
@@ -516,8 +531,8 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
 .aba.ativa { color: var(--texto); }
 .aba.ativa::before { content: '['; color: var(--cor, var(--texto-fraco)); }
 .aba.ativa::after { content: ']'; color: var(--cor, var(--texto-fraco)); }
-/* na coluna sem o foco do teclado, a aba ativa fica um tom mais apagada */
-.coluna:not(.foco) .aba.ativa { color: #b4b4b4; }
+/* na célula sem o foco do teclado, a aba ativa fica um tom mais apagada */
+.celula:not(.foco) .aba.ativa { color: #b4b4b4; }
 .aba .claude { font-size: 10px; color: var(--brasa); }
 /* o terminal escondido apitou (sino): um ponto aceso até a aba ser aberta */
 .aba .sino { font-size: 15px; line-height: 1; color: var(--brasa); }
