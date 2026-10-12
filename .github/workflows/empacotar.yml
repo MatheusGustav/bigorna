@@ -23,10 +23,15 @@ jobs:
       - run: npm ci
       - name: empacotar (.rpm e AppImage em dist/)
         run: npx electron-builder --linux --publish never
-      - name: pendurar na Release da tag
-        if: startsWith(github.ref, 'refs/tags/')
+      # Rodando à mão, a tag sai da versão do package.json e a própria
+      # action cria tag e Release; vindo de uma tag empurrada, usa ela.
+      - name: versão do package.json
+        id: v
+        run: echo "versao=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: pendurar na Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.v.outputs.versao }}
           files: |
             dist/*.rpm
             dist/*.AppImage
