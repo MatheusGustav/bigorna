@@ -1263,10 +1263,38 @@ function linhaDaArvore(caminho, nome, ehPasta, nivel) {
   el.draggable = true;
   el.addEventListener('dragstart', (ev) => {
     ev.preventDefault(); // o arrasto do HTML sai de cena; quem assume é o do sistema
-    window.api.arrastarArquivo(caminho);
+    // um item marcado (Ctrl+clique) leva a seleção inteira junto
+    window.api.arrastarArquivo(selecionados.has(caminho) ? [...selecionados] : caminho);
   });
+  if (selecionados.has(caminho)) el.classList.add('selecionado'); // a marca sobrevive à releitura
   return el;
 }
+
+// ---------- seleção de vários (Ctrl+clique) ----------
+// Ctrl+clique marca e desmarca itens nas metades das pastas; arrastar um
+// item marcado leva todos juntos (mover, copiar ou lixeira de uma vez).
+// Clique comum em qualquer lugar da lateral desmarca tudo.
+
+const selecionados = new Set(); // caminhos marcados
+
+function limparSelecao() {
+  if (!selecionados.size) return;
+  selecionados.clear();
+  for (const el of document.querySelectorAll('#lateral .item.selecionado')) el.classList.remove('selecionado');
+}
+
+$('lateral').addEventListener('click', (ev) => {
+  if (!ev.ctrlKey) return limparSelecao(); // clique comum: desmarca e segue o caminho normal
+  const linha = ev.target.closest('.item');
+  if (!linha || !linha.dados?.caminho) return;
+  ev.preventDefault();
+  ev.stopPropagation(); // o Ctrl+clique só marca: não abre nem fecha nada
+  if (selecionados.delete(linha.dados.caminho)) linha.classList.remove('selecionado');
+  else {
+    selecionados.add(linha.dados.caminho);
+    linha.classList.add('selecionado');
+  }
+}, true); // na captura: passa na frente do abrir do item
 
 function marcarAtivo(linha) {
   if (itemAtivo) itemAtivo.classList.remove('aberto-no-editor');
@@ -1613,7 +1641,7 @@ $('lateral').addEventListener('dragover', (ev) => {
   if (!alvo) return;
   alvo.el.classList.add('alvo-de-soltar');
   ev.preventDefault();
-  ev.dataTransfer.dropEffect = 'move';
+  ev.dataTransfer.dropEffect = ev.ctrlKey && !alvo.praLixeira ? 'copy' : 'move'; // Ctrl copia
 });
 
 $('lateral').addEventListener('dragleave', (ev) => {
@@ -1626,22 +1654,31 @@ $('lateral').addEventListener('drop', async (ev) => {
   if (alvoDeSoltar) alvoDeSoltar.classList.remove('alvo-de-soltar');
   alvoDeSoltar = null;
   const alvo = pastaDoSoltar(ev);
-  const solto = ev.dataTransfer.files[0];
-  const origem = solto ? window.api.caminhoDoArquivo(solto) : null;
-  if (!alvo || !origem) return;
+  const origens = [...ev.dataTransfer.files].map((f) => window.api.caminhoDoArquivo(f)).filter(Boolean);
+  if (!alvo || !origens.length) return;
   ev.preventDefault();
   ev.stopPropagation();
-  if (alvo.praLixeira) {
-    const r = await window.api.lixeira(origem).catch(() => ({ erro: 'lixeira' }));
-    if (r && r.erro) avisar('não consegui mover pra lixeira');
-    return; // a lista da lixeira se refaz pelo vigia de files/
+  const copiar = ev.ctrlKey && !alvo.praLixeira; // Ctrl apertado: copia em vez de mover
+  const erros = [];
+  for (const origem of origens) {
+    const r = alvo.praLixeira
+      ? await window.api.lixeira(origem).catch(() => ({ erro: 'lixeira' }))
+      : copiar
+        ? await window.api.copiarPara(origem, alvo.pasta).catch(() => ({ erro: 'copiar' }))
+        : await window.api.mover(origem, alvo.pasta).catch(() => ({ erro: 'mover' }));
+    if (r && r.erro && r.erro !== 'mesmo') erros.push(r.erro); // "já estava ali" não é erro
   }
-  const r = await window.api.mover(origem, alvo.pasta).catch(() => ({ erro: 'mover' }));
-  if (r.erro === 'mesmo') return; // soltou onde já estava: nada a fazer
-  if (r.erro === 'existe') return avisar('já existe um com esse nome aí dentro');
-  if (r.erro === 'dentro') return avisar('a pasta não cabe dentro dela mesma');
-  if (r.erro === 'disco') return avisar('mover entre discos ainda não dá');
-  if (r.erro) return avisar('não consegui mover');
+  limparSelecao(); // depois do soltar, os caminhos marcados já mudaram de lugar
+  if (!erros.length) return;
+  const AVISO = {
+    existe: 'já existe um com esse nome aí dentro',
+    dentro: 'a pasta não cabe dentro dela mesma',
+    lixeira: 'não consegui mover pra lixeira',
+    copiar: 'não consegui copiar',
+    mover: 'não consegui mover',
+  };
+  if (origens.length === 1) return avisar(AVISO[erros[0]] || 'não deu');
+  avisar(`${erros.length} de ${origens.length} ficaram: ${AVISO[erros[0]] || 'não deu'}`);
 });
 
 // ============================================================
@@ -1795,10 +1832,12 @@ function itensDoMenu(linha, opcoes) {
     },
     '-',
     { texto: 'Renomear…', icone: ic.renomear, acao: () => renomear(linha) },
+    { texto: 'Duplicar', icone: ic.duplicar, acao: () => duplicar(linha) },
     { texto: 'Mover pra lixeira', icone: ic.lixeira, acao: () => apagar(linha, 'lixeira') },
     { texto: 'Excluir de vez…', icone: ic.excluir, acao: () => apagar(linha, 'excluir') },
     '-',
     { texto: 'Compactar (.zip)', icone: ic.compactar, acao: () => compactar(linha) },
+    opcoes.compactado && { texto: 'Extrair aqui', icone: ic.extrair, acao: () => extrair(linha) },
     opcoes.audio && { texto: 'Transcrever áudio', icone: ic.transcrever, acao: () => window.api.transcrever(caminho) },
     '-',
     { texto: 'Propriedades', icone: ic.propriedades, acao: () => window.api.propriedades(caminho) },
@@ -1975,6 +2014,22 @@ async function compactar(linha) {
   const { caminho } = linha.dados;
   const r = await window.api.compactar(caminho).catch(() => ({ erro: 'falhou' }));
   if (r.erro) return avisar('não consegui compactar');
+  await recarregarPasta(pastaDe(caminho));
+}
+
+// O caminho de volta: o compactado vira uma pasta ao lado, com o nome dele.
+async function extrair(linha) {
+  const { caminho } = linha.dados;
+  const r = await window.api.extrair(caminho).catch(() => ({ erro: 'falhou' }));
+  if (r.erro) return avisar('não consegui extrair');
+  await recarregarPasta(pastaDe(caminho));
+}
+
+// "nota.txt" ganha uma "nota (cópia).txt" do lado, igual ao Dolphin.
+async function duplicar(linha) {
+  const { caminho } = linha.dados;
+  const r = await window.api.duplicar(caminho).catch(() => ({ erro: 'falhou' }));
+  if (r.erro) return avisar('não consegui duplicar');
   await recarregarPasta(pastaDe(caminho));
 }
 

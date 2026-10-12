@@ -510,10 +510,13 @@ ipcMain.handle('fs:raiz-de-fora', async (_ev, pasta) => {
 const ICONE_DE_ARRASTO = nativeImage.createFromDataURL(
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAWElEQVR42mNgoDd49uzZf2IwRRZwcXHhxRRZQqwFMJqmFpBlCakWkGwJORaQZAkpkUxW6iLGAnwWk2SBlZUVUZhsC2jug6FvwWgcjMbBaBzQ0AJKMN1bKQBZDkgC0Nmn/AAAAABJRU5ErkJggg=='
 );
-ipcMain.on('fs:arrastar', (ev, caminho) => {
-  if (typeof caminho === 'string' && path.isAbsolute(caminho)) {
-    ev.sender.startDrag({ file: caminho, icon: ICONE_DE_ARRASTO });
-  }
+ipcMain.on('fs:arrastar', (ev, caminhos) => {
+  // um caminho só ou vários (a seleção por Ctrl+clique vai inteira junto)
+  const lista = (Array.isArray(caminhos) ? caminhos : [caminhos])
+    .filter((c) => typeof c === 'string' && path.isAbsolute(c));
+  if (!lista.length) return;
+  if (lista.length === 1) ev.sender.startDrag({ file: lista[0], icon: ICONE_DE_ARRASTO });
+  else ev.sender.startDrag({ files: lista, icon: ICONE_DE_ARRASTO });
 });
 
 // Pastas primeiro, por nome; arquivos por ordem de chegada, o mais novo no
@@ -759,9 +762,11 @@ const ICONES_DO_MENU = {
   pasta: 'folder-new',
   arquivo: 'document-new',
   renomear: 'edit-rename',
+  duplicar: 'edit-copy',
   lixeira: 'user-trash',
   excluir: 'edit-delete',
   compactar: 'archive-insert',
+  extrair: 'archive-extract',
   transcrever: 'audio-input-microphone', // o mesmo do transcrever.desktop
   propriedades: 'document-properties',
 };
@@ -775,6 +780,7 @@ ipcMain.handle('menu:opcoes', async (_ev, caminho, ehPasta) => {
   return {
     programas: await programasPara(tipo),
     audio: !ehPasta && ehAudio(tipo),
+    compactado: !ehPasta && EXTRAIVEIS.test(caminho), // ganha o "Extrair aqui"
     icones,
   };
 });
@@ -852,7 +858,53 @@ ipcMain.handle('fs:mover', async (_ev, origem, destino) => {
   try {
     await fs.rename(origem, alvo);
   } catch (e) {
-    return { erro: e.code === 'EXDEV' ? 'disco' : 'mover' }; // rename não cruza disco
+    if (e.code !== 'EXDEV') return { erro: 'mover' };
+    // entre discos o rename não vale: copia inteiro e só então apaga a origem
+    try {
+      await fs.cp(origem, alvo, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+      await fs.rm(origem, { recursive: true, force: true });
+    } catch {
+      await fs.rm(alvo, { recursive: true, force: true }).catch(() => {}); // não fica metade no destino
+      return { erro: 'mover' };
+    }
+  }
+  return { caminho: alvo };
+});
+
+// Copiar pra dentro de outra pasta (Ctrl apertado no soltar da lateral).
+ipcMain.handle('fs:copiar', async (_ev, origem, destino) => {
+  if (!path.isAbsolute(origem) || !path.isAbsolute(destino)) return { erro: 'caminho' };
+  const alvo = path.join(destino, path.basename(origem));
+  if ((destino + '/').startsWith(origem + '/')) return { erro: 'dentro' };
+  if (await fs.access(alvo).then(() => true, () => false)) return { erro: 'existe' };
+  try {
+    await fs.cp(origem, alvo, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+  } catch {
+    await fs.rm(alvo, { recursive: true, force: true }).catch(() => {});
+    return { erro: 'copiar' };
+  }
+  return { caminho: alvo };
+});
+
+// Duplicar ao lado: "nota.txt" vira "nota (cópia).txt", depois "(cópia 2)"…
+ipcMain.handle('fs:duplicar', async (_ev, caminho) => {
+  if (!podeMexer(caminho)) return { erro: 'caminho' };
+  const pasta = path.dirname(caminho);
+  const nome = path.basename(caminho);
+  const ehPasta = (await fs.lstat(caminho)).isDirectory();
+  const ponto = ehPasta ? -1 : nome.lastIndexOf('.');
+  const base = ponto > 0 ? nome.slice(0, ponto) : nome;
+  const ext = ponto > 0 ? nome.slice(ponto) : '';
+  let copia = `${base} (cópia)${ext}`;
+  for (let n = 2; await fs.access(path.join(pasta, copia)).then(() => true, () => false); n++) {
+    copia = `${base} (cópia ${n})${ext}`;
+  }
+  const alvo = path.join(pasta, copia);
+  try {
+    await fs.cp(caminho, alvo, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+  } catch {
+    await fs.rm(alvo, { recursive: true, force: true }).catch(() => {});
+    return { erro: 'copiar' };
   }
   return { caminho: alvo };
 });
@@ -983,6 +1035,32 @@ ipcMain.handle('fs:zip', async (_ev, caminho) => {
   // impede que um nome começando com "-" seja lido como opção do zip
   await rodar('zip', ['-r', '-q', '-y', './' + zip, './' + nome], { cwd: pasta, maxBuffer: 16 * 1024 * 1024 });
   return { ok: true, zip: path.join(pasta, zip) };
+});
+
+// O caminho de volta do zip: "Extrair aqui" abre o compactado numa pasta ao
+// lado, com o nome dele (sem a extensão). unzip pro .zip, tar pro resto.
+const EXTRAIVEIS = /\.(tar\.gz|tar\.bz2|tar\.xz|tgz|txz|tbz2|tar|zip)$/i;
+
+ipcMain.handle('fs:extrair', async (_ev, caminho) => {
+  if (!podeMexer(caminho)) return { erro: 'caminho' };
+  const achado = path.basename(caminho).match(EXTRAIVEIS);
+  if (!achado) return { erro: 'tipo' };
+  const pasta = path.dirname(caminho);
+  const base = path.basename(caminho).slice(0, -achado[0].length) || 'extraido';
+  let nome = base;
+  for (let n = 2; await fs.access(path.join(pasta, nome)).then(() => true, () => false); n++) {
+    nome = `${base} (${n})`;
+  }
+  const destino = path.join(pasta, nome);
+  await fs.mkdir(destino);
+  try {
+    if (/\.zip$/i.test(caminho)) await rodar('unzip', ['-q', caminho, '-d', destino], { maxBuffer: 16 * 1024 * 1024 });
+    else await rodar('tar', ['-xf', caminho, '-C', destino], { maxBuffer: 16 * 1024 * 1024 });
+  } catch {
+    await fs.rm(destino, { recursive: true, force: true }).catch(() => {});
+    return { erro: 'extrair' };
+  }
+  return { caminho: destino };
 });
 
 // ---------- Ajustes: o caderninho de preferências da Bigorna ----------
