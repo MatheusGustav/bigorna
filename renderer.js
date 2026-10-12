@@ -2642,7 +2642,7 @@ async function abrirArquivo(caminho) {
       theme: 'vs-dark',
       automaticLayout: true,
       fontSize: 14,
-      minimap: { enabled: false },
+      minimap: { enabled: true }, // a miniatura do código na borda direita, igual ao VS Code
       wordWrap: 'on', // linha comprida quebra na borda, sem rolagem horizontal
     });
     // Ctrl+S grava na hora, pro costume não atrapalhar — mas nem precisa:
