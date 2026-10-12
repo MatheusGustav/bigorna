@@ -1509,6 +1509,63 @@ $('filtro').addEventListener('keydown', (ev) => {
 });
 
 // ============================================================
+// SOLTAR NA LATERAL: arrastar pra cima de uma pasta move o item pra
+// dentro dela, igual ao Dolphin fazia
+// ============================================================
+// O arrasto é o nativo do sistema (o mesmo que leva pro WhatsApp e pro
+// terminal), então também serve pra reorganizar aqui dentro — e aceita até
+// arquivo vindo de fora da Bigorna. Só pasta recebe; o vazio da árvore
+// recebe pra raiz daquela metade. O vigia da pasta recarrega a tela sozinho.
+
+let alvoDeSoltar = null; // o que está aceso debaixo do arrasto
+
+// Em que pasta o soltar cairia: numa linha de pasta, nela; no vazio da
+// árvore, na raiz da metade (casa ou a base do [fora]). Linha de arquivo
+// não recebe, senão todo canto viraria alvo e o mover sairia sem querer.
+function pastaDoSoltar(ev) {
+  const linha = ev.target.closest('.item');
+  if (linha) return linha.dados?.ehPasta ? { el: linha, pasta: linha.dados.caminho } : null;
+  if (ev.target.id !== 'arvore' && ev.target.id !== 'arvore-fora') return null;
+  const raiz = ev.target.id === 'arvore' ? casa
+    : [...pastasLidas].find(([, dados]) => dados.recipiente === ev.target && dados.nivel === 0)?.[0];
+  return raiz ? { el: ev.target, pasta: raiz } : null;
+}
+
+$('lateral').addEventListener('dragover', (ev) => {
+  if (!ev.dataTransfer.types.includes('Files')) return;
+  const alvo = pastaDoSoltar(ev);
+  if (alvoDeSoltar && alvoDeSoltar !== alvo?.el) alvoDeSoltar.classList.remove('alvo-de-soltar');
+  alvoDeSoltar = alvo ? alvo.el : null;
+  if (!alvo) return;
+  alvo.el.classList.add('alvo-de-soltar');
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+});
+
+$('lateral').addEventListener('dragleave', (ev) => {
+  if (ev.relatedTarget && $('lateral').contains(ev.relatedTarget)) return;
+  if (alvoDeSoltar) alvoDeSoltar.classList.remove('alvo-de-soltar');
+  alvoDeSoltar = null;
+});
+
+$('lateral').addEventListener('drop', async (ev) => {
+  if (alvoDeSoltar) alvoDeSoltar.classList.remove('alvo-de-soltar');
+  alvoDeSoltar = null;
+  const alvo = pastaDoSoltar(ev);
+  const solto = ev.dataTransfer.files[0];
+  const origem = solto ? window.api.caminhoDoArquivo(solto) : null;
+  if (!alvo || !origem) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const r = await window.api.mover(origem, alvo.pasta).catch(() => ({ erro: 'mover' }));
+  if (r.erro === 'mesmo') return; // soltou onde já estava: nada a fazer
+  if (r.erro === 'existe') return avisar('já existe um com esse nome aí dentro');
+  if (r.erro === 'dentro') return avisar('a pasta não cabe dentro dela mesma');
+  if (r.erro === 'disco') return avisar('mover entre discos ainda não dá');
+  if (r.erro) return avisar('não consegui mover');
+});
+
+// ============================================================
 // SOLTAR NO TERMINAL: arquivo (da lateral ou de fora) vira o caminho
 // no prompt, igual ao Konsole
 // ============================================================

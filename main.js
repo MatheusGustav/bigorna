@@ -841,6 +841,22 @@ ipcMain.handle('fs:create', async (_ev, caminho, ehPasta) => {
   }
 });
 
+// Mover arquivo ou pasta pra dentro de outra (o soltar na lateral). Não
+// passa por cima de ninguém: nome já existindo no destino, não mexe.
+ipcMain.handle('fs:mover', async (_ev, origem, destino) => {
+  if (!path.isAbsolute(origem) || !path.isAbsolute(destino)) return { erro: 'caminho' };
+  const alvo = path.join(destino, path.basename(origem));
+  if (alvo === origem) return { erro: 'mesmo' }; // soltou na pasta onde já estava
+  if ((destino + '/').startsWith(origem + '/')) return { erro: 'dentro' }; // pasta pra dentro dela mesma
+  if (await fs.access(alvo).then(() => true, () => false)) return { erro: 'existe' };
+  try {
+    await fs.rename(origem, alvo);
+  } catch (e) {
+    return { erro: e.code === 'EXDEV' ? 'disco' : 'mover' }; // rename não cruza disco
+  }
+  return { caminho: alvo };
+});
+
 ipcMain.handle('fs:trash', async (_ev, caminho) => {
   if (!podeMexer(caminho)) return { erro: 'caminho' };
   await sistema.trashItem(caminho);

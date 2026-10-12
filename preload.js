@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('api', {
   caminhoDoArquivo: (arquivo) => webUtils.getPathForFile(arquivo),
 
   renomear: (de, para) => ipcRenderer.invoke('fs:rename', de, para),
+  mover: (origem, destino) => ipcRenderer.invoke('fs:mover', origem, destino),
   criar: (caminho, ehPasta) => ipcRenderer.invoke('fs:create', caminho, ehPasta),
   lixeira: (caminho) => ipcRenderer.invoke('fs:trash', caminho),
   excluir: (caminho) => ipcRenderer.invoke('fs:delete', caminho),

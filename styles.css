@@ -202,6 +202,9 @@ button { font: inherit; }
 .item:hover { background: #1e1e1e; }
 .item.aberto-no-editor { background: #262626; }
 .item.alvo-do-menu { background: #2e2e2e; }      /* clicado com o botão direito */
+/* o alvo aceso debaixo de um arrasto: é ali que o soltar vai cair */
+.item.alvo-de-soltar { background: #2e2e2e; outline: 1px solid var(--texto-fraco); outline-offset: -1px; }
+#arvore.alvo-de-soltar, #arvore-fora.alvo-de-soltar { outline: 1px solid var(--texto-fraco); outline-offset: -1px; }
 .caixa-nome {                                    /* renomear e criar novo */
   flex: 1;
   min-width: 0;
