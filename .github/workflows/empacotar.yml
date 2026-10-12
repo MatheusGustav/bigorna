@@ -1,0 +1,32 @@
+# Empurrar uma tag v* (ou rodar à mão) empacota a Bigorna e pendura o .rpm
+# e o AppImage numa Release — instalar é só baixar, sem npm na máquina.
+name: empacotar
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # a Release é escrita no próprio repositório
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: rpmbuild (o empacotador de .rpm não vem no runner)
+        run: sudo apt-get update && sudo apt-get install -y rpm
+      - run: npm ci
+      - name: empacotar (.rpm e AppImage em dist/)
+        run: npx electron-builder --linux --publish never
+      - name: pendurar na Release da tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.rpm
+            dist/*.AppImage

@@ -47,6 +47,7 @@ Este arquivo é um retrato do presente: mudou algo, troca-se a linha. Histórico
 - Licença **PolyForm Noncommercial 1.0.0** (`LICENSE.md`); repositório público em MatheusGustav/bigorna.
 - Rodar: `npm start`. Sem suíte de testes; conferir é abrir e usar.
 - **Instalada x projeto**: o menu do sistema abre o pacote instalado em `/opt/Bigorna`, não esta pasta. Mexer aqui não muda a instalada. `npm run empacotar` gera o `.rpm` e o AppImage em `dist/` (fora do git), e a versão nova entra com `sudo dnf install` do `.rpm`. As configurações em `~/.config/bigorna` são as mesmas pras duas.
+- **Release pronta no GitHub**: empurrar uma tag `v*` roda a action `empacotar` (`.github/workflows/empacotar.yml`), que gera o `.rpm` e o AppImage e pendura na Release — instalar é baixar o `.rpm` em `github.com/MatheusGustav/bigorna/releases` e dar `sudo dnf install`, sem npm na máquina.
 
 ## Memórias do projeto
 
