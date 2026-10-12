@@ -1,6 +1,6 @@
 {
   "name": "bigorna",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "Terminal com editor, pastas e (depois) joguinhos",
   "main": "main.js",
   "scripts": {
@@ -45,6 +45,9 @@
       "fontes/**",
       "LICENSE.md"
     ],
+    "rpm": {
+      "fpm": ["--rpm-rpmbuild-define", "_build_id_links none"]
+    },
     "linux": {
       "target": [
         "AppImage",
