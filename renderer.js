@@ -39,13 +39,17 @@ function mudarLetra(nova) {
   }
 }
 
-// Cores das etiquetas de grupo. Cada repositório pega a próxima da fila e
-// fica com ela; acabando as cores, a fila recomeça. Verde, amarelo e vermelho
-// primeiro (ordem do Matheus); daí em diante, o que combinar com o preto.
+// Cores das etiquetas de grupo: cada repositório usa a cor da linguagem
+// dominante dele (tabela do GitHub, que o processo principal descobre e
+// entrega junto do pty:info). Repositório sem linguagem reconhecida pega a
+// próxima da fila e fica com ela; acabando as cores, a fila recomeça. Verde,
+// amarelo e vermelho primeiro (ordem do Matheus); daí em diante, o que
+// combinar com o preto.
 const CORES_DE_GRUPO = ['#8fd36a', '#e8c84a', '#e05c5c', '#5fd3c3', '#b48cff', '#6aa1e0', '#ff8a3d'];
 const corDoRepo = new Map();
-function corDoGrupo(repo) {
-  if (!corDoRepo.has(repo)) corDoRepo.set(repo, CORES_DE_GRUPO[corDoRepo.size % CORES_DE_GRUPO.length]);
+function corDoGrupo(repo, corDaLinguagem) {
+  if (corDaLinguagem) corDoRepo.set(repo, corDaLinguagem);
+  else if (!corDoRepo.has(repo)) corDoRepo.set(repo, CORES_DE_GRUPO[corDoRepo.size % CORES_DE_GRUPO.length]);
   return corDoRepo.get(repo);
 }
 
@@ -1029,7 +1033,7 @@ function desenharAbas() {
     cel.el.classList.toggle('foco', cel === celulaAtiva);
     // o terminal à mostra leva a cor do repositório dele num fio no topo
     const ativo = terminais.get(cel.ativo);
-    if (ativo && ativo.info && ativo.info.repo) cel.el.style.setProperty('--cor', corDoGrupo(ativo.info.repo));
+    if (ativo && ativo.info && ativo.info.repo) cel.el.style.setProperty('--cor', corDoGrupo(ativo.info.repo, ativo.info.cor));
     else cel.el.style.removeProperty('--cor'); // sem repositório, a moldura fica no cinza padrão
 
     const grupos = new Map(); // repositório → abas dele, na ordem de abertura
@@ -1048,7 +1052,7 @@ function desenharAbas() {
     for (const [repo, ids] of grupos) {
       const grupo = document.createElement('div');
       grupo.className = 'grupo';
-      grupo.style.setProperty('--cor', corDoGrupo(repo));
+      grupo.style.setProperty('--cor', corDoGrupo(repo, terminais.get(ids[0]).info.cor));
       const etiqueta = document.createElement('span');
       etiqueta.className = 'etiqueta';
       etiqueta.textContent = terminais.get(ids[0]).info.nome;

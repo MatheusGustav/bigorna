@@ -294,13 +294,75 @@ async function infoDoRepositorio(id, cwd) {
   return { repo: dados.repo, nome: dados.nome, branch: ref ? ref[1] : 'HEAD' };
 }
 
+// A cor do grupo é a da linguagem dominante do repositório, com a tabela de
+// cores do GitHub. A conta é barata de propósito: conta arquivos por extensão
+// na raiz e nas pastas de código comuns, sem entrar em node_modules nem
+// vasculhar a árvore toda. Repositório sem linguagem reconhecida responde
+// null, e a janela usa a fila de cores dela.
+const COR_DA_LINGUAGEM = {
+  '.js': '#f1e05a', '.mjs': '#f1e05a', '.cjs': '#f1e05a', '.jsx': '#f1e05a',
+  '.ts': '#3178c6', '.tsx': '#3178c6',
+  '.py': '#3572a5',
+  '.rs': '#dea584',
+  '.go': '#00add8',
+  '.java': '#b07219',
+  '.kt': '#a97bff', '.kts': '#a97bff',
+  '.rb': '#701516',
+  '.php': '#4f5d95',
+  '.c': '#555555', '.h': '#555555',
+  '.cpp': '#f34b7d', '.cc': '#f34b7d', '.hpp': '#f34b7d',
+  '.cs': '#178600',
+  '.swift': '#f05138',
+  '.dart': '#00b4ab',
+  '.lua': '#000080',
+  '.ex': '#6e4a7e', '.exs': '#6e4a7e',
+  '.zig': '#ec915c',
+  '.vue': '#41b883',
+  '.svelte': '#ff3e00',
+  '.sh': '#89e051',
+};
+const PASTAS_DE_CODIGO = ['', 'src', 'lib', 'app', 'cmd'];
+
+// Linguagem que o GitHub pinta escura (C, Ruby, Lua…) some no fundo preto:
+// clareia misturando com branco, aos poucos, até dar pra ler — o tom fica.
+function corLegivel(hex) {
+  let [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  while (0.2126 * r + 0.7152 * g + 0.0722 * b < 110) {
+    [r, g, b] = [r, g, b].map((c) => Math.min(255, Math.round(c * 0.7 + 255 * 0.3)));
+  }
+  return '#' + [r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('');
+}
+
+const corPorRepo = new Map(); // repo → Promise<cor|null>: a conta roda uma vez só
+function corDoRepositorio(repo) {
+  if (!corPorRepo.has(repo)) {
+    corPorRepo.set(repo, (async () => {
+      const contagem = new Map();
+      for (const pasta of PASTAS_DE_CODIGO) {
+        const itens = await fs.readdir(path.join(repo, pasta), { withFileTypes: true }).catch(() => []);
+        for (const item of itens) {
+          if (!item.isFile()) continue;
+          const cor = COR_DA_LINGUAGEM[path.extname(item.name).toLowerCase()];
+          if (cor) contagem.set(cor, (contagem.get(cor) || 0) + 1);
+        }
+      }
+      let melhor = null;
+      let mais = 0;
+      for (const [cor, n] of contagem) if (n > mais) { melhor = cor; mais = n; }
+      return melhor && corLegivel(melhor);
+    })());
+  }
+  return corPorRepo.get(repo);
+}
+
 ipcMain.handle('pty:info', async (_ev, id) => {
   const p = shells.get(id);
   if (!p) return null;
   const cwd = await fs.readlink(`/proc/${p.pid}/cwd`).catch(() => null);
   // p.process às vezes vem com o caminho inteiro (/bin/bash): fica só o nome
-  const info = { cwd, programa: path.basename(p.process || ''), repo: null, nome: null, branch: null };
+  const info = { cwd, programa: path.basename(p.process || ''), repo: null, nome: null, branch: null, cor: null };
   if (cwd) Object.assign(info, await infoDoRepositorio(id, cwd) || {});
+  if (info.repo) info.cor = await corDoRepositorio(info.repo);
   return info;
 });
 
