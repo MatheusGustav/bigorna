@@ -2138,10 +2138,11 @@ function ligarZoomDaImagem(img) {
 // jogo abre sem internet.
 // O fliperama entra sempre pela direita, com uma aba própria na barra da
 // célula. Com uma célula só, ele vira uma coluna nova ao lado dela, em pé:
-// prateleira em cima, tela embaixo, atalhos no pé. Com terminal na célula
-// dele, entra na metade de baixo, deitado: tela à esquerda, prateleira e
-// atalhos à direita, com a divisa arrastável. Fechar o último terminal da
-// célula devolve a célula inteira pra ele.
+// tela em cima, atalhos no pé. Com terminal na célula dele, entra na metade
+// de baixo, deitado: tela à esquerda, atalhos à direita, com a divisa
+// arrastável. A prateleira é uma gaveta por cima da tela, encostada na
+// direita (ctrl+e abre e fecha). Fechar o último terminal da célula devolve
+// a célula inteira pra ele.
 
 const CORE_DO_JOGO = [
   [/\.(sfc|smc|fig)$/i, 'snes9x'],              // Super Nintendo
@@ -2316,6 +2317,11 @@ async function abrirFliperama(caminho) {
   const itens = pedacoDaMesa('fl-linha');
   atalhos.append(itens);
   itens.append(
+    // a prateleira é uma gaveta: abre por cima da tela, encostada na direita
+    botaoDaMesa('prateleira', () => {
+      const aberta = el.classList.toggle('prateleira-aberta');
+      if (!aberta) tela.focus();
+    }, 'e'),
     botaoDaMesa('pausar', (ev) => {
       if (!jogo) return;
       const parado = jogo.getStatus() === 'paused';
@@ -2378,7 +2384,10 @@ async function abrirFliperama(caminho) {
   atualizarTrilho();
   await encherPrateleira(caminho);
   if (caminho) await rodarJogo(caminho);
-  else tela.focus();
+  else {
+    el.classList.add('prateleira-aberta'); // sem jogo, a escolha já vem à mostra
+    tela.focus();
+  }
 }
 
 // Desliga o aparelho guardando o ponto. A célula só dele vai embora junto;
@@ -2428,10 +2437,11 @@ function arrastarDivisaDaLinha(evInicio) {
 }
 
 // A tela cresce até o limite do espaço mantendo o formato do console (4:3,
-// 10:9…). Em pé ela segue a largura da célula, deitada segue a altura da
-// metade, e nos dois casos o outro lado para em 60%, pra prateleira e os
-// atalhos não serem engolidos. É feito aqui, e não no CSS, porque o emulador
-// escreve tamanho fixo no próprio canvas e o espaço muda de forma.
+// 10:9…). Em pé ela toma a caixa do jogo inteira (a prateleira virou gaveta
+// e não ocupa mais lugar); deitada segue a altura da metade, com a largura
+// parando em 60% pros atalhos não serem engolidos. É feito aqui, e não no
+// CSS, porque o emulador escreve tamanho fixo no próprio canvas e o espaço
+// muda de forma.
 function ajustarTela() {
   if (!fliperama) return;
   const { el, tela } = fliperama;
@@ -2444,7 +2454,8 @@ function ajustarTela() {
     escala = Math.min(altura / h, (el.clientWidth * 0.6) / w);
   } else {
     const largura = caixa.clientWidth - parseFloat(estilo.paddingLeft) - parseFloat(estilo.paddingRight);
-    escala = Math.min(largura / w, (el.clientHeight * 0.6) / h);
+    const altura = caixa.clientHeight - parseFloat(estilo.paddingTop) - parseFloat(estilo.paddingBottom);
+    escala = Math.min(largura / w, altura / h);
   }
   tela.style.setProperty('width', Math.max(0, Math.floor(w * escala)) + 'px', 'important');
   tela.style.setProperty('height', Math.max(0, Math.floor(h * escala)) + 'px', 'important');
@@ -2478,6 +2489,7 @@ const nomeDoJogo = (caminho) => caminho ? caminho.slice(caminho.lastIndexOf('/')
 // Troca a fita do aparelho que já está na tela.
 async function rodarJogo(caminho) {
   const { tela, rotulo, prateleira } = fliperama;
+  fliperama.el.classList.remove('prateleira-aberta'); // escolheu: a gaveta fecha
   for (const b of prateleira.querySelectorAll('.mesa-jogo')) b.classList.toggle('tocando', b.caminho === caminho);
   if (jogo) {
     await guardarPonto(); // trocar de jogo também não perde o de antes

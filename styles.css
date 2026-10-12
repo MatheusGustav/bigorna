@@ -298,31 +298,43 @@ button { font: inherit; }
 .toca-audio audio { width: 100%; }
 
 /* fliperama: o console mora na área dos terminais, numa célula com aba
-   própria. Em pé (célula só dele): prateleira | tela | atalhos, de cima pra
-   baixo. Deitado (metade de baixo, com terminal em cima): tela à esquerda,
-   prateleira e atalhos empilhados à direita. */
+   própria. Em pé (célula só dele): tela em cima, atalhos no pé. Deitado
+   (metade de baixo, com terminal em cima): tela à esquerda, atalhos à
+   direita. A prateleira não ocupa lugar: é uma gaveta por cima da tela,
+   encostada na direita — ctrl+e (ou o botão nos atalhos) abre e fecha. */
 .fliperama {
   flex: 1 1 auto;
   min-height: 0;
   margin: 10px 6px 7px;
+  position: relative; /* a gaveta da prateleira se pendura nele */
   display: grid;
   gap: 16px 6px;
-  grid-template-areas: 'prat' 'jogo' 'atalhos';
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  grid-template-areas: 'jogo' 'atalhos';
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 /* na célula inteira dele não há terminal pra mostrar; o respiro a mais em
-   cima tira o rótulo da prateleira de baixo da aba */
+   cima tira o rótulo do jogo de baixo da aba */
 .celula.fl-inteira .terminais { display: none; }
 .celula.fl-inteira .fliperama { margin-top: 26px; }
 .fliperama.metade {
   flex: 0 0 42%; /* o tamanho de partida; a divisa arrasta */
-  grid-template-areas: 'jogo prat' 'jogo atalhos';
+  grid-template-areas: 'jogo atalhos';
   grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
 }
-.fl-prateleira { grid-area: prat; }
 .fl-jogo { grid-area: jogo; }
 .fl-atalhos { grid-area: atalhos; }
+/* a gaveta da prateleira: por cima da tela, da borda de cima à de baixo */
+.fl-prateleira {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: min(300px, 70%);
+  background: var(--fundo);
+}
+.fliperama:not(.prateleira-aberta) .fl-prateleira { display: none; }
 .fl-prateleira, .fl-atalhos {
   position: relative;
   border: 1px solid var(--borda-2);
