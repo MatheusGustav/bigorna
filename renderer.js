@@ -2923,10 +2923,13 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
   const area = $('editor-area');
   const larguraInicio = area.getBoundingClientRect().width;
   const xInicio = evInicio.clientX;
+  // o arquivo cresce até onde o terminal ainda fica com os 200px dele,
+  // senão a divisa some da tela e não tem como puxar de volta
+  const maior = larguraInicio + $('terminal-area').getBoundingClientRect().width - 200;
 
   function mover(ev) {
     const nova = larguraInicio + (ev.clientX - xInicio);
-    area.style.width = Math.max(200, nova) + 'px';
+    area.style.width = Math.max(200, Math.min(nova, maior)) + 'px';
   }
   function soltar() {
     window.removeEventListener('mousemove', mover);

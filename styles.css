@@ -243,7 +243,8 @@ button { font: inherit; }
 #editor-area {
   width: 50%;            /* o divisor muda */
   min-width: 200px;
-  flex: none;
+  flex: 0 1 auto;        /* largura pedida, mas encolhe: o arquivo não pode
+                            empurrar o terminal pra fora da janela */
   position: relative;
   margin: 11px 0 8px;
   border: 1px solid var(--borda-2);
