@@ -2643,6 +2643,7 @@ async function abrirArquivo(caminho) {
       automaticLayout: true,
       fontSize: 14,
       minimap: { enabled: false },
+      wordWrap: 'on', // linha comprida quebra na borda, sem rolagem horizontal
     });
     // Ctrl+S grava na hora, pro costume não atrapalhar — mas nem precisa:
     // toda mudança já salva sozinha. Forçado: grava mesmo se mudou por fora.
