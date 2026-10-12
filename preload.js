@@ -40,8 +40,16 @@ contextBridge.exposeInMainWorld('api', {
   caminhoDoArquivo: (arquivo) => webUtils.getPathForFile(arquivo),
 
   renomear: (de, para) => ipcRenderer.invoke('fs:rename', de, para),
+  mover: (origem, destino) => ipcRenderer.invoke('fs:mover', origem, destino),
+  copiarPara: (origem, destino) => ipcRenderer.invoke('fs:copiar', origem, destino),
+  duplicar: (caminho) => ipcRenderer.invoke('fs:duplicar', caminho),
+  extrair: (caminho) => ipcRenderer.invoke('fs:extrair', caminho),
   criar: (caminho, ehPasta) => ipcRenderer.invoke('fs:create', caminho, ehPasta),
   lixeira: (caminho) => ipcRenderer.invoke('fs:trash', caminho),
+  lixeiraLista: () => ipcRenderer.invoke('lixeira:lista'),
+  lixeiraRestaurar: (id) => ipcRenderer.invoke('lixeira:restaurar', id),
+  lixeiraExcluir: (id) => ipcRenderer.invoke('lixeira:excluir', id),
+  lixeiraEsvaziar: () => ipcRenderer.invoke('lixeira:esvaziar'),
   excluir: (caminho) => ipcRenderer.invoke('fs:delete', caminho),
   compactar: (caminho) => ipcRenderer.invoke('fs:zip', caminho),
 

@@ -190,6 +190,10 @@ button { font: inherit; }
 #arvore-fora { padding-top: 3px; }
 #fora[hidden] { display: none; }
 #fora-nome { text-transform: lowercase; }
+/* a metade da lixeira segue o desenho da metade de fora */
+#lixeira { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--borda-2); margin-top: 10px; padding-top: 9px; }
+#lixeira[hidden] { display: none; }
+#arvore-lixeira { flex: 1; min-height: 0; overflow-y: auto; padding: 3px 0 12px; user-select: none; }
 
 .item {
   display: flex;
@@ -202,6 +206,10 @@ button { font: inherit; }
 .item:hover { background: #1e1e1e; }
 .item.aberto-no-editor { background: #262626; }
 .item.alvo-do-menu { background: #2e2e2e; }      /* clicado com o botão direito */
+.item.selecionado { background: #2e2e2e; }       /* marcado com Ctrl+clique: vai junto no arrasto */
+/* o alvo aceso debaixo de um arrasto: é ali que o soltar vai cair */
+.item.alvo-de-soltar { background: #2e2e2e; outline: 1px solid var(--texto-fraco); outline-offset: -1px; }
+#arvore.alvo-de-soltar, #arvore-fora.alvo-de-soltar, #arvore-lixeira.alvo-de-soltar { outline: 1px solid var(--texto-fraco); outline-offset: -1px; }
 .caixa-nome {                                    /* renomear e criar novo */
   flex: 1;
   min-width: 0;
@@ -243,7 +251,8 @@ button { font: inherit; }
 #editor-area {
   width: 50%;            /* o divisor muda */
   min-width: 200px;
-  flex: none;
+  flex: 0 1 auto;        /* largura pedida, mas encolhe: o arquivo não pode
+                            empurrar o terminal pra fora da janela */
   position: relative;
   margin: 11px 0 8px;
   border: 1px solid var(--borda-2);
@@ -297,32 +306,44 @@ button { font: inherit; }
 }
 .toca-audio audio { width: 100%; }
 
-/* fliperama: o console mora na área dos terminais, numa coluna com aba
-   própria. Em pé (coluna só dele): prateleira | tela | atalhos, de cima pra
-   baixo. Deitado (metade de baixo, com terminal em cima): tela à esquerda,
-   prateleira e atalhos empilhados à direita. */
+/* fliperama: o console mora na área dos terminais, numa célula com aba
+   própria. Em pé (célula só dele): tela em cima, atalhos no pé. Deitado
+   (metade de baixo, com terminal em cima): tela à esquerda, atalhos à
+   direita. A prateleira não ocupa lugar: é uma gaveta por cima da tela,
+   encostada na direita — ctrl+e (ou o botão nos atalhos) abre e fecha. */
 .fliperama {
   flex: 1 1 auto;
   min-height: 0;
   margin: 10px 6px 7px;
+  position: relative; /* a gaveta da prateleira se pendura nele */
   display: grid;
   gap: 16px 6px;
-  grid-template-areas: 'prat' 'jogo' 'atalhos';
-  grid-template-rows: minmax(0, 1fr) auto auto;
-}
-/* na coluna inteira dele não há terminal pra mostrar; o respiro a mais em
-   cima tira o rótulo da prateleira de baixo da aba */
-.coluna.fl-inteira .terminais { display: none; }
-.coluna.fl-inteira .fliperama { margin-top: 26px; }
-.fliperama.metade {
-  flex: 0 0 42%; /* o tamanho de partida; a divisa arrasta */
-  grid-template-areas: 'jogo prat' 'jogo atalhos';
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: 'jogo' 'atalhos';
   grid-template-rows: minmax(0, 1fr) auto;
 }
-.fl-prateleira { grid-area: prat; }
+/* na célula inteira dele não há terminal pra mostrar; o respiro a mais em
+   cima tira o rótulo do jogo de baixo da aba */
+.celula.fl-inteira .terminais { display: none; }
+.celula.fl-inteira .fliperama { margin-top: 26px; }
+.fliperama.metade {
+  flex: 0 0 42%; /* o tamanho de partida; a divisa arrasta */
+  grid-template-areas: 'jogo atalhos';
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
 .fl-jogo { grid-area: jogo; }
 .fl-atalhos { grid-area: atalhos; }
+/* a gaveta da prateleira: por cima da tela, da borda de cima à de baixo */
+.fl-prateleira {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: min(300px, 70%);
+  background: var(--fundo);
+}
+.fliperama:not(.prateleira-aberta) .fl-prateleira { display: none; }
 .fl-prateleira, .fl-atalhos {
   position: relative;
   border: 1px solid var(--borda-2);
@@ -419,7 +440,7 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
 }
 /* a lateral fechada ainda ocupa a margem dela, então nada cola no trilho */
 
-/* ---------- a grade de terminais: linhas de colunas ---------- */
+/* ---------- a grade de terminais: linhas de colunas, colunas de células ---------- */
 #colunas {
   flex: 1;
   min-height: 0;
@@ -439,26 +460,41 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
   cursor: row-resize;
 }
 .divisa-entre-linhas:hover { background: #1a1a1a; }
-/* zoom: a coluna marcada toma a área inteira; as outras esperam escondidas */
+/* zoom: a célula marcada toma a área inteira; as outras esperam escondidas */
 #colunas.zoom > .linha:not(.tem-zoom), #colunas.zoom > .divisa-entre-linhas { display: none; }
-.linha.tem-zoom > .coluna:not(.zoom), .linha.tem-zoom > .divisa-coluna { display: none; }
+.linha.tem-zoom > .coluna:not(.tem-zoom), .linha.tem-zoom > .divisa-coluna { display: none; }
+.coluna.tem-zoom > .celula:not(.zoom), .coluna.tem-zoom > .divisa-celula { display: none; }
 .coluna {
   flex: 1 1 0;
   min-width: 120px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column; /* as células, empilhadas */
+  overflow: hidden; /* células demais não vazam da linha */
+}
+.celula {
+  flex: 1 1 0;
+  min-height: 120px;
   position: relative;
   margin: 11px 0 8px;
   border: 1px solid var(--borda-2);
   display: flex;
   flex-direction: column;
 }
-/* a coluna com o teclado tem a moldura na cor do repositório da aba ativa */
-.coluna.foco { border-color: var(--cor, var(--texto-fraco)); }
+/* a célula com o teclado tem a moldura na cor do repositório da aba ativa */
+.celula.foco { border-color: var(--cor, var(--texto-fraco)); }
 .divisa-coluna {
   width: 6px;
   flex: none;
   cursor: col-resize;
 }
 .divisa-coluna:hover { background: #1a1a1a; }
+.divisa-celula {
+  height: 6px;
+  flex: none;
+  cursor: row-resize;
+}
+.divisa-celula:hover { background: #1a1a1a; }
 
 /* ---------- abas dos terminais (estilo Konsole, grupos por repositório) ---------- */
 /* as abas ficam escritas em cima da linha da moldura, como o lazygit faz */
@@ -516,8 +552,8 @@ body.arrastando-divisa { cursor: col-resize; user-select: none; }
 .aba.ativa { color: var(--texto); }
 .aba.ativa::before { content: '['; color: var(--cor, var(--texto-fraco)); }
 .aba.ativa::after { content: ']'; color: var(--cor, var(--texto-fraco)); }
-/* na coluna sem o foco do teclado, a aba ativa fica um tom mais apagada */
-.coluna:not(.foco) .aba.ativa { color: #b4b4b4; }
+/* na célula sem o foco do teclado, a aba ativa fica um tom mais apagada */
+.celula:not(.foco) .aba.ativa { color: #b4b4b4; }
 .aba .claude { font-size: 10px; color: var(--brasa); }
 /* o terminal escondido apitou (sino): um ponto aceso até a aba ser aberta */
 .aba .sino { font-size: 15px; line-height: 1; color: var(--brasa); }

@@ -44,12 +44,17 @@
     </nav>
 
     <aside id="lateral">
-      <div class="rot"><span class="seg on">pastas</span><span class="seg" id="raiz-nome"></span><span class="seg btn" id="btn-ocultos" title="Mostrar ou esconder os arquivos de ponto (ocultos)">ocultos</span></div>
+      <div class="rot"><span class="seg on">pastas</span><span class="seg" id="raiz-nome"></span><span class="seg btn" id="btn-ocultos" title="Mostrar ou esconder os arquivos de ponto (ocultos)">ocultos</span><span class="seg btn" id="btn-lixeira" title="Abrir e fechar a lixeira do sistema">lixeira</span></div>
       <div id="arvore"></div>
       <!-- metade de baixo: aparece quando o terminal da vez está fora da casa -->
       <div id="fora" hidden>
         <div class="rot"><span class="seg on">fora</span><span class="seg" id="fora-nome"></span></div>
         <div id="arvore-fora"></div>
+      </div>
+      <!-- metade da lixeira: a do sistema, aberta pelo botão na linha de cima -->
+      <div id="lixeira" hidden>
+        <div class="rot"><span class="seg on">lixeira</span><span class="seg" id="lixeira-conta"></span><span class="seg btn" id="btn-esvaziar" title="Apaga de vez tudo o que está na lixeira">esvaziar</span></div>
+        <div id="arvore-lixeira"></div>
       </div>
       <!-- o filtro, no pé: digitar esconde o que não casa -->
       <input id="filtro" spellcheck="false" placeholder="filtrar"

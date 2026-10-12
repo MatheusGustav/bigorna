@@ -294,13 +294,75 @@ async function infoDoRepositorio(id, cwd) {
   return { repo: dados.repo, nome: dados.nome, branch: ref ? ref[1] : 'HEAD' };
 }
 
+// A cor do grupo é a da linguagem dominante do repositório, com a tabela de
+// cores do GitHub. A conta é barata de propósito: conta arquivos por extensão
+// na raiz e nas pastas de código comuns, sem entrar em node_modules nem
+// vasculhar a árvore toda. Repositório sem linguagem reconhecida responde
+// null, e a janela usa a fila de cores dela.
+const COR_DA_LINGUAGEM = {
+  '.js': '#f1e05a', '.mjs': '#f1e05a', '.cjs': '#f1e05a', '.jsx': '#f1e05a',
+  '.ts': '#3178c6', '.tsx': '#3178c6',
+  '.py': '#3572a5',
+  '.rs': '#dea584',
+  '.go': '#00add8',
+  '.java': '#b07219',
+  '.kt': '#a97bff', '.kts': '#a97bff',
+  '.rb': '#701516',
+  '.php': '#4f5d95',
+  '.c': '#555555', '.h': '#555555',
+  '.cpp': '#f34b7d', '.cc': '#f34b7d', '.hpp': '#f34b7d',
+  '.cs': '#178600',
+  '.swift': '#f05138',
+  '.dart': '#00b4ab',
+  '.lua': '#000080',
+  '.ex': '#6e4a7e', '.exs': '#6e4a7e',
+  '.zig': '#ec915c',
+  '.vue': '#41b883',
+  '.svelte': '#ff3e00',
+  '.sh': '#89e051',
+};
+const PASTAS_DE_CODIGO = ['', 'src', 'lib', 'app', 'cmd'];
+
+// Linguagem que o GitHub pinta escura (C, Ruby, Lua…) some no fundo preto:
+// clareia misturando com branco, aos poucos, até dar pra ler — o tom fica.
+function corLegivel(hex) {
+  let [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  while (0.2126 * r + 0.7152 * g + 0.0722 * b < 110) {
+    [r, g, b] = [r, g, b].map((c) => Math.min(255, Math.round(c * 0.7 + 255 * 0.3)));
+  }
+  return '#' + [r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('');
+}
+
+const corPorRepo = new Map(); // repo → Promise<cor|null>: a conta roda uma vez só
+function corDoRepositorio(repo) {
+  if (!corPorRepo.has(repo)) {
+    corPorRepo.set(repo, (async () => {
+      const contagem = new Map();
+      for (const pasta of PASTAS_DE_CODIGO) {
+        const itens = await fs.readdir(path.join(repo, pasta), { withFileTypes: true }).catch(() => []);
+        for (const item of itens) {
+          if (!item.isFile()) continue;
+          const cor = COR_DA_LINGUAGEM[path.extname(item.name).toLowerCase()];
+          if (cor) contagem.set(cor, (contagem.get(cor) || 0) + 1);
+        }
+      }
+      let melhor = null;
+      let mais = 0;
+      for (const [cor, n] of contagem) if (n > mais) { melhor = cor; mais = n; }
+      return melhor && corLegivel(melhor);
+    })());
+  }
+  return corPorRepo.get(repo);
+}
+
 ipcMain.handle('pty:info', async (_ev, id) => {
   const p = shells.get(id);
   if (!p) return null;
   const cwd = await fs.readlink(`/proc/${p.pid}/cwd`).catch(() => null);
   // p.process às vezes vem com o caminho inteiro (/bin/bash): fica só o nome
-  const info = { cwd, programa: path.basename(p.process || ''), repo: null, nome: null, branch: null };
+  const info = { cwd, programa: path.basename(p.process || ''), repo: null, nome: null, branch: null, cor: null };
   if (cwd) Object.assign(info, await infoDoRepositorio(id, cwd) || {});
+  if (info.repo) info.cor = await corDoRepositorio(info.repo);
   return info;
 });
 
@@ -448,10 +510,13 @@ ipcMain.handle('fs:raiz-de-fora', async (_ev, pasta) => {
 const ICONE_DE_ARRASTO = nativeImage.createFromDataURL(
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAWElEQVR42mNgoDd49uzZf2IwRRZwcXHhxRRZQqwFMJqmFpBlCakWkGwJORaQZAkpkUxW6iLGAnwWk2SBlZUVUZhsC2jug6FvwWgcjMbBaBzQ0AJKMN1bKQBZDkgC0Nmn/AAAAABJRU5ErkJggg=='
 );
-ipcMain.on('fs:arrastar', (ev, caminho) => {
-  if (typeof caminho === 'string' && path.isAbsolute(caminho)) {
-    ev.sender.startDrag({ file: caminho, icon: ICONE_DE_ARRASTO });
-  }
+ipcMain.on('fs:arrastar', (ev, caminhos) => {
+  // um caminho só ou vários (a seleção por Ctrl+clique vai inteira junto)
+  const lista = (Array.isArray(caminhos) ? caminhos : [caminhos])
+    .filter((c) => typeof c === 'string' && path.isAbsolute(c));
+  if (!lista.length) return;
+  if (lista.length === 1) ev.sender.startDrag({ file: lista[0], icon: ICONE_DE_ARRASTO });
+  else ev.sender.startDrag({ files: lista, icon: ICONE_DE_ARRASTO });
 });
 
 // Pastas primeiro, por nome; arquivos por ordem de chegada, o mais novo no
@@ -697,9 +762,11 @@ const ICONES_DO_MENU = {
   pasta: 'folder-new',
   arquivo: 'document-new',
   renomear: 'edit-rename',
+  duplicar: 'edit-copy',
   lixeira: 'user-trash',
   excluir: 'edit-delete',
   compactar: 'archive-insert',
+  extrair: 'archive-extract',
   transcrever: 'audio-input-microphone', // o mesmo do transcrever.desktop
   propriedades: 'document-properties',
 };
@@ -713,6 +780,7 @@ ipcMain.handle('menu:opcoes', async (_ev, caminho, ehPasta) => {
   return {
     programas: await programasPara(tipo),
     audio: !ehPasta && ehAudio(tipo),
+    compactado: !ehPasta && EXTRAIVEIS.test(caminho), // ganha o "Extrair aqui"
     icones,
   };
 });
@@ -728,6 +796,8 @@ const ICONES_DA_ABA = {
   zoom: 'view-fullscreen',
   esquerda: 'go-previous',
   direita: 'go-next',
+  cima: 'go-up',
+  baixo: 'go-down',
 };
 
 ipcMain.handle('menu:icones-da-aba', async () => {
@@ -777,9 +847,155 @@ ipcMain.handle('fs:create', async (_ev, caminho, ehPasta) => {
   }
 });
 
+// Mover arquivo ou pasta pra dentro de outra (o soltar na lateral). Não
+// passa por cima de ninguém: nome já existindo no destino, não mexe.
+ipcMain.handle('fs:mover', async (_ev, origem, destino) => {
+  if (!path.isAbsolute(origem) || !path.isAbsolute(destino)) return { erro: 'caminho' };
+  const alvo = path.join(destino, path.basename(origem));
+  if (alvo === origem) return { erro: 'mesmo' }; // soltou na pasta onde já estava
+  if ((destino + '/').startsWith(origem + '/')) return { erro: 'dentro' }; // pasta pra dentro dela mesma
+  if (await fs.access(alvo).then(() => true, () => false)) return { erro: 'existe' };
+  try {
+    await fs.rename(origem, alvo);
+  } catch (e) {
+    if (e.code !== 'EXDEV') return { erro: 'mover' };
+    // entre discos o rename não vale: copia inteiro e só então apaga a origem
+    try {
+      await fs.cp(origem, alvo, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+      await fs.rm(origem, { recursive: true, force: true });
+    } catch {
+      await fs.rm(alvo, { recursive: true, force: true }).catch(() => {}); // não fica metade no destino
+      return { erro: 'mover' };
+    }
+  }
+  return { caminho: alvo };
+});
+
+// Copiar pra dentro de outra pasta (Ctrl apertado no soltar da lateral).
+ipcMain.handle('fs:copiar', async (_ev, origem, destino) => {
+  if (!path.isAbsolute(origem) || !path.isAbsolute(destino)) return { erro: 'caminho' };
+  const alvo = path.join(destino, path.basename(origem));
+  if ((destino + '/').startsWith(origem + '/')) return { erro: 'dentro' };
+  if (await fs.access(alvo).then(() => true, () => false)) return { erro: 'existe' };
+  try {
+    await fs.cp(origem, alvo, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+  } catch {
+    await fs.rm(alvo, { recursive: true, force: true }).catch(() => {});
+    return { erro: 'copiar' };
+  }
+  return { caminho: alvo };
+});
+
+// Duplicar ao lado: "nota.txt" vira "nota (cópia).txt", depois "(cópia 2)"…
+ipcMain.handle('fs:duplicar', async (_ev, caminho) => {
+  if (!podeMexer(caminho)) return { erro: 'caminho' };
+  const pasta = path.dirname(caminho);
+  const nome = path.basename(caminho);
+  const ehPasta = (await fs.lstat(caminho)).isDirectory();
+  const ponto = ehPasta ? -1 : nome.lastIndexOf('.');
+  const base = ponto > 0 ? nome.slice(0, ponto) : nome;
+  const ext = ponto > 0 ? nome.slice(ponto) : '';
+  let copia = `${base} (cópia)${ext}`;
+  for (let n = 2; await fs.access(path.join(pasta, copia)).then(() => true, () => false); n++) {
+    copia = `${base} (cópia ${n})${ext}`;
+  }
+  const alvo = path.join(pasta, copia);
+  try {
+    await fs.cp(caminho, alvo, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+  } catch {
+    await fs.rm(alvo, { recursive: true, force: true }).catch(() => {});
+    return { erro: 'copiar' };
+  }
+  return { caminho: alvo };
+});
+
 ipcMain.handle('fs:trash', async (_ev, caminho) => {
   if (!podeMexer(caminho)) return { erro: 'caminho' };
   await sistema.trashItem(caminho);
+  return { ok: true };
+});
+
+// ---------- Lixeira (a do sistema, ~/.local/share/Trash) ----------
+// O trashItem de cima segue o padrão freedesktop: o item vai pra files/ e um
+// .trashinfo em info/ guarda o caminho original (percent-encoded) e a hora.
+// Sem Dolphin na máquina, é a Bigorna quem lê e desfaz isso.
+const LIXEIRA = path.join(os.homedir(), '.local/share/Trash');
+const metaDaLixeira = (id) => path.join(LIXEIRA, 'info', id + '.trashinfo');
+
+ipcMain.handle('lixeira:lista', async () => {
+  const nomes = await fs.readdir(path.join(LIXEIRA, 'info')).catch(() => []);
+  const itens = [];
+  for (const nome of nomes) {
+    if (!nome.endsWith('.trashinfo')) continue;
+    const id = nome.slice(0, -'.trashinfo'.length);
+    const texto = await fs.readFile(path.join(LIXEIRA, 'info', nome), 'utf8').catch(() => '');
+    const origem = texto.match(/^Path=(.+)$/m);
+    const stat = await fs.lstat(path.join(LIXEIRA, 'files', id)).catch(() => null);
+    if (!origem || !stat) continue; // meta órfã (ou arquivo órfão): não aparece
+    let caminho = origem[1];
+    try { caminho = decodeURIComponent(caminho); } catch { /* fica como veio */ }
+    const data = texto.match(/^DeletionDate=(.+)$/m);
+    itens.push({ id, origem: caminho, data: data ? data[1] : '', ehPasta: stat.isDirectory() });
+  }
+  itens.sort((a, b) => b.data.localeCompare(a.data)); // o mais novo em cima
+  return itens;
+});
+
+ipcMain.handle('lixeira:restaurar', async (_ev, id) => {
+  if (typeof id !== 'string' || !id || id.includes('/')) return { erro: 'id' };
+  const texto = await fs.readFile(metaDaLixeira(id), 'utf8').catch(() => null);
+  const achado = texto && texto.match(/^Path=(.+)$/m);
+  if (!achado) return { erro: 'meta' };
+  let destino = achado[1];
+  try { destino = decodeURIComponent(destino); } catch { /* fica como veio */ }
+  if (!path.isAbsolute(destino)) return { erro: 'meta' };
+  if (await fs.access(destino).then(() => true, () => false)) return { erro: 'existe' };
+  await fs.mkdir(path.dirname(destino), { recursive: true }).catch(() => {}); // a pasta de origem pode ter ido junto
+  try {
+    await fs.rename(path.join(LIXEIRA, 'files', id), destino);
+  } catch (e) {
+    return { erro: e.code === 'EXDEV' ? 'disco' : 'restaurar' };
+  }
+  await fs.rm(metaDaLixeira(id), { force: true });
+  return { caminho: destino };
+});
+
+ipcMain.handle('lixeira:excluir', async (ev, id) => {
+  if (typeof id !== 'string' || !id || id.includes('/')) return { erro: 'id' };
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(ev.sender), {
+    type: 'warning',
+    title: 'Excluir de vez',
+    message: `Excluir "${id}" de vez?`,
+    detail: 'Some da lixeira sem volta. Não dá pra recuperar.',
+    buttons: ['Excluir', 'Cancelar'],
+    defaultId: 1, // Enter sem querer cancela
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response !== 0) return { cancelado: true };
+  await fs.rm(path.join(LIXEIRA, 'files', id), { recursive: true, force: true });
+  await fs.rm(metaDaLixeira(id), { force: true });
+  return { ok: true };
+});
+
+ipcMain.handle('lixeira:esvaziar', async (ev) => {
+  const nomes = await fs.readdir(path.join(LIXEIRA, 'files')).catch(() => []);
+  if (!nomes.length) return { ok: true }; // já estava vazia
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(ev.sender), {
+    type: 'warning',
+    title: 'Esvaziar a lixeira',
+    message: `Esvaziar a lixeira (${nomes.length} ${nomes.length === 1 ? 'item' : 'itens'})?`,
+    detail: 'Tudo some de vez. Não dá pra recuperar.',
+    buttons: ['Esvaziar', 'Cancelar'],
+    defaultId: 1, // Enter sem querer cancela
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response !== 0) return { cancelado: true };
+  for (const nome of nomes) await fs.rm(path.join(LIXEIRA, 'files', nome), { recursive: true, force: true });
+  for (const nome of await fs.readdir(path.join(LIXEIRA, 'info')).catch(() => [])) {
+    await fs.rm(path.join(LIXEIRA, 'info', nome), { force: true });
+  }
   return { ok: true };
 });
 
@@ -819,6 +1035,32 @@ ipcMain.handle('fs:zip', async (_ev, caminho) => {
   // impede que um nome começando com "-" seja lido como opção do zip
   await rodar('zip', ['-r', '-q', '-y', './' + zip, './' + nome], { cwd: pasta, maxBuffer: 16 * 1024 * 1024 });
   return { ok: true, zip: path.join(pasta, zip) };
+});
+
+// O caminho de volta do zip: "Extrair aqui" abre o compactado numa pasta ao
+// lado, com o nome dele (sem a extensão). unzip pro .zip, tar pro resto.
+const EXTRAIVEIS = /\.(tar\.gz|tar\.bz2|tar\.xz|tgz|txz|tbz2|tar|zip)$/i;
+
+ipcMain.handle('fs:extrair', async (_ev, caminho) => {
+  if (!podeMexer(caminho)) return { erro: 'caminho' };
+  const achado = path.basename(caminho).match(EXTRAIVEIS);
+  if (!achado) return { erro: 'tipo' };
+  const pasta = path.dirname(caminho);
+  const base = path.basename(caminho).slice(0, -achado[0].length) || 'extraido';
+  let nome = base;
+  for (let n = 2; await fs.access(path.join(pasta, nome)).then(() => true, () => false); n++) {
+    nome = `${base} (${n})`;
+  }
+  const destino = path.join(pasta, nome);
+  await fs.mkdir(destino);
+  try {
+    if (/\.zip$/i.test(caminho)) await rodar('unzip', ['-q', caminho, '-d', destino], { maxBuffer: 16 * 1024 * 1024 });
+    else await rodar('tar', ['-xf', caminho, '-C', destino], { maxBuffer: 16 * 1024 * 1024 });
+  } catch {
+    await fs.rm(destino, { recursive: true, force: true }).catch(() => {});
+    return { erro: 'extrair' };
+  }
+  return { caminho: destino };
 });
 
 // ---------- Ajustes: o caderninho de preferências da Bigorna ----------

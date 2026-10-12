@@ -32,24 +32,28 @@ function mudarLetra(nova) {
   guardarAjuste('letra', nova === LETRA_PADRAO ? undefined : nova);
   for (const [id, t] of terminais) {
     t.term.options.fontSize = nova;
-    if (t.col.ativo === id) {
+    if (t.cel.ativo === id) {
       t.fit.fit();
       window.api.ptyResize(id, t.term.cols, t.term.rows);
     }
   }
 }
 
-// Cores das etiquetas de grupo. Cada repositório pega a próxima da fila e
-// fica com ela; acabando as cores, a fila recomeça. Verde, amarelo e vermelho
-// primeiro (ordem do Matheus); daí em diante, o que combinar com o preto.
+// Cores das etiquetas de grupo: cada repositório usa a cor da linguagem
+// dominante dele (tabela do GitHub, que o processo principal descobre e
+// entrega junto do pty:info). Repositório sem linguagem reconhecida pega a
+// próxima da fila e fica com ela; acabando as cores, a fila recomeça. Verde,
+// amarelo e vermelho primeiro (ordem do Matheus); daí em diante, o que
+// combinar com o preto.
 const CORES_DE_GRUPO = ['#8fd36a', '#e8c84a', '#e05c5c', '#5fd3c3', '#b48cff', '#6aa1e0', '#ff8a3d'];
 const corDoRepo = new Map();
-function corDoGrupo(repo) {
-  if (!corDoRepo.has(repo)) corDoRepo.set(repo, CORES_DE_GRUPO[corDoRepo.size % CORES_DE_GRUPO.length]);
+function corDoGrupo(repo, corDaLinguagem) {
+  if (corDaLinguagem) corDoRepo.set(repo, corDaLinguagem);
+  else if (!corDoRepo.has(repo)) corDoRepo.set(repo, CORES_DE_GRUPO[corDoRepo.size % CORES_DE_GRUPO.length]);
   return corDoRepo.get(repo);
 }
 
-const terminais = new Map(); // id → { term, fit, caixa, info, col }
+const terminais = new Map(); // id → { term, fit, caixa, info, cel }
 let proximoTerminal = 1;
 let terminalAtivo = null;
 let abaDoMenu = null; // aba clicada com o botão direito, pra ela ficar marcada
@@ -57,26 +61,29 @@ let casa = ''; // pasta pessoal, pro título "~ bash" da aba
 
 const terminalDaVez = () => terminais.get(terminalAtivo) || null;
 
-// ---------- a grade: linhas de colunas ----------
-// A área se divide numa grade: linhas de cima pra baixo e, dentro de cada
-// linha, colunas lado a lado — quantas o Matheus quiser (quem limita é a
-// largura; cada coluna tem no mínimo 120px). Nada se arruma sozinho: linha e
-// coluna nascem e morrem pela mão dele (arrasto, menu, +). Cada coluna tem a
-// própria barra de abas e mostra um terminal por vez; clicar numa aba só
-// troca o terminal daquela coluna.
+// ---------- a grade: linhas de colunas, colunas de células ----------
+// A área se divide numa grade: linhas de cima pra baixo; dentro de cada
+// linha, colunas lado a lado; e dentro de cada coluna, células empilhadas —
+// quantas o Matheus quiser (quem limita é o monitor; cada pedaço tem no
+// mínimo 120px). A célula é quem tem a barra de abas e mostra um terminal
+// por vez; clicar numa aba só troca o terminal daquela célula. Nada se
+// arruma sozinho: linha, coluna e célula nascem e morrem pela mão dele
+// (arrasto, menu, +).
 
-const linhas = []; // { el, colunas: [{ el, listaEl, terminaisEl, ativo }] }, de cima pra baixo
-let colunaAtiva = null; // a coluna do terminal com o teclado
-let colunaZoom = null; // a coluna ocupando a área inteira, se houver
-let contadorDeColunas = 0;
+const linhas = []; // { el, colunas: [{ el, celulas: [{ el, listaEl, terminaisEl, ativo }] }] }, de cima pra baixo
+let celulaAtiva = null; // a célula do terminal com o teclado
+let celulaZoom = null; // a célula ocupando a área inteira, se houver
+let contadorDeCelulas = 0;
 
 const todasAsColunas = () => linhas.flatMap((l) => l.colunas);
+const todasAsCelulas = () => todasAsColunas().flatMap((c) => c.celulas);
 const linhaDe = (col) => linhas.find((l) => l.colunas.includes(col));
+const colunaDe = (cel) => todasAsColunas().find((c) => c.celulas.includes(cel));
 
-const idsDaColuna = (col) => [...terminais].filter(([, t]) => t.col === col).map(([id]) => id);
+const idsDaCelula = (cel) => [...terminais].filter(([, t]) => t.cel === cel).map(([id]) => id);
 
-// Coluna ou linha nova entra com o tamanho médio das irmãs, senão quem já
-// foi alargado no arrasto esmagaria a recém-chegada.
+// Linha, coluna ou célula nova entra com o tamanho médio das irmãs, senão
+// quem já foi alargado no arrasto esmagaria a recém-chegada.
 function tamanhoDeEntrada(el, irmas) {
   const medidas = irmas.map((i) => Number(i.el.style.flexGrow)).filter((n) => n > 0);
   if (medidas.length) el.style.flexGrow = medidas.reduce((a, b) => a + b, 0) / medidas.length;
@@ -98,108 +105,127 @@ function removerLinha(linha) {
   linha.el.remove();
 }
 
-// Encolheu ou cresceu uma coluna (janela, lateral, divisores): reajusta o
+// Encolheu ou cresceu uma célula (janela, lateral, divisores): reajusta o
 // terminal à mostra nela. Os escondidos se ajustam ao serem ativados.
 let ajustePendente = null;
-const ajustadorDeColunas = new ResizeObserver(() => {
+const ajustadorDeCelulas = new ResizeObserver(() => {
   clearTimeout(ajustePendente);
   ajustePendente = setTimeout(() => {
-    for (const col of todasAsColunas()) {
-      const t = terminais.get(col.ativo);
+    for (const cel of todasAsCelulas()) {
+      const t = terminais.get(cel.ativo);
       if (!t) continue;
       t.fit.fit();
-      window.api.ptyResize(col.ativo, t.term.cols, t.term.rows);
+      window.api.ptyResize(cel.ativo, t.term.cols, t.term.rows);
     }
   }, 50);
 });
 
-// Cria a coluna logo depois da coluna dada (ou no fim da última linha).
-function criarColuna(aposDe) {
-  if (aposDe && linhaDe(aposDe)) {
-    const linha = linhaDe(aposDe);
-    return criarColunaEm(linha, linha.colunas.indexOf(aposDe) + 1);
-  }
+// Cria uma coluna nova no fim da última linha.
+function criarColunaNoFim() {
   const linha = linhas[linhas.length - 1] || criarLinhaEm(0);
   return criarColunaEm(linha, linha.colunas.length);
 }
 
+// Cria uma coluna nova logo à direita da coluna dada.
+function criarColunaAoLado(col) {
+  const linha = linhaDe(col);
+  if (!linha) return criarColunaNoFim();
+  return criarColunaEm(linha, linha.colunas.indexOf(col) + 1);
+}
+
+// Toda coluna nasce com uma célula dentro, e é a célula que volta: é com
+// ela que todo mundo fala (abas, terminais); a coluna é só a pilha.
 function criarColunaEm(linha, indice) {
-  const col = { ativo: null };
+  const col = { celulas: [] };
   col.el = document.createElement('div');
   col.el.className = 'coluna';
+  tamanhoDeEntrada(col.el, linha.colunas);
+  linha.colunas.splice(indice, 0, col);
+  return criarCelulaEm(col, 0);
+}
+
+function criarCelulaEm(col, indice) {
+  const cel = { ativo: null };
+  cel.el = document.createElement('div');
+  cel.el.className = 'celula';
   const abas = document.createElement('div');
   abas.className = 'abas';
-  col.listaEl = document.createElement('div');
-  col.listaEl.className = 'abas-lista';
+  cel.listaEl = document.createElement('div');
+  cel.listaEl.className = 'abas-lista';
   const mais = document.createElement('button');
   mais.className = 'btn-nova-aba';
   mais.textContent = '+';
-  mais.title = 'Abrir outro terminal nesta coluna';
-  mais.addEventListener('click', () => criarTerminal(undefined, col));
-  abas.append(col.listaEl, mais);
+  mais.title = 'Abrir outro terminal nesta célula';
+  mais.addEventListener('click', () => criarTerminal(undefined, cel));
+  abas.append(cel.listaEl, mais);
 
-  // Pegar na parte vazia da barra arrasta a coluna inteira; soltar em cima de
-  // outra coluna troca as duas de lugar.
+  // Pegar na parte vazia da barra arrasta a coluna inteira (a pilha toda);
+  // soltar em cima de outra coluna troca as duas de lugar.
   abas.draggable = true;
   abas.addEventListener('dragstart', (ev) => {
     if (ev.target !== abas) return; // é o arrasto de uma aba, não da coluna
     ev.dataTransfer.setData(TIPO_COLUNA, '');
     ev.dataTransfer.effectAllowed = 'move';
-    arrastandoColuna = col;
-    col.el.classList.add('arrastando');
+    arrastandoColuna = colunaDe(cel);
+    arrastandoColuna.el.classList.add('arrastando');
   });
   abas.addEventListener('dragend', () => limparArrasto());
 
   // Costumes do Konsole com o mouse: a rodinha na barra passa pelas abas da
-  // coluna (dando a volta no fim), e duplo clique na parte vazia abre outro
+  // célula (dando a volta no fim), e duplo clique na parte vazia abre outro
   // terminal ali, como o + faria.
   abas.addEventListener('wheel', (ev) => {
-    const ids = idsDaColuna(col);
+    const ids = idsDaCelula(cel);
     if (ids.length < 2) return;
     ev.preventDefault();
     const passo = (ev.deltaY || ev.deltaX) > 0 ? 1 : -1;
-    const atual = ids.indexOf(col.ativo);
+    const atual = ids.indexOf(cel.ativo);
     ativarTerminal(ids[(atual + passo + ids.length) % ids.length]);
   });
   abas.addEventListener('dblclick', (ev) => {
-    if (ev.target === abas || ev.target === col.listaEl) criarTerminal(undefined, col);
+    if (ev.target === abas || ev.target === cel.listaEl) criarTerminal(undefined, cel);
   });
 
-  col.terminaisEl = document.createElement('div');
-  col.terminaisEl.className = 'terminais';
-  col.el.append(abas, col.terminaisEl);
+  cel.terminaisEl = document.createElement('div');
+  cel.terminaisEl.className = 'terminais';
+  cel.el.append(abas, cel.terminaisEl);
 
-  col.id = ++contadorDeColunas;
-  tamanhoDeEntrada(col.el, linha.colunas);
-  linha.colunas.splice(indice, 0, col);
-  ajustadorDeColunas.observe(col.terminaisEl);
+  cel.id = ++contadorDeCelulas;
+  tamanhoDeEntrada(cel.el, col.celulas);
+  col.celulas.splice(indice, 0, cel);
+  ajustadorDeCelulas.observe(cel.terminaisEl);
   arrumarTela();
-  return col;
+  return cel;
 }
 
-function removerColuna(col) {
-  if (temFliperama(col)) return; // a casa do fliperama fica: ele toma a coluna inteira
-  const linha = linhaDe(col);
-  if (!linha || todasAsColunas().length < 2) return; // a última fica, mesmo vazia
-  linha.colunas.splice(linha.colunas.indexOf(col), 1);
-  ajustadorDeColunas.unobserve(col.terminaisEl);
-  col.el.remove();
-  if (!linha.colunas.length) removerLinha(linha);
-  const todas = todasAsColunas();
-  if (!todas.includes(colunaAtiva)) colunaAtiva = todas[todas.length - 1];
+function removerCelula(cel) {
+  if (temFliperama(cel)) return; // a casa do fliperama fica: ele toma a célula inteira
+  const col = colunaDe(cel);
+  if (!col || todasAsCelulas().length < 2) return; // a última fica, mesmo vazia
+  col.celulas.splice(col.celulas.indexOf(cel), 1);
+  ajustadorDeCelulas.unobserve(cel.terminaisEl);
+  cel.el.remove();
+  if (!col.celulas.length) {
+    const linha = linhaDe(col);
+    linha.colunas.splice(linha.colunas.indexOf(col), 1);
+    col.el.remove();
+    if (!linha.colunas.length) removerLinha(linha);
+  }
+  const todas = todasAsCelulas();
+  if (!todas.includes(celulaAtiva)) celulaAtiva = todas[todas.length - 1];
   arrumarTela();
 }
 
-// Põe linhas e colunas na tela na ordem da grade, com uma divisa arrastável
-// entre vizinhas. Refeito a cada mudança de estrutura; se nada mudou, não
-// mexe (mexer à toa faria o terminal piscar).
+// Põe linhas, colunas e células na tela na ordem da grade, com uma divisa
+// arrastável entre vizinhas. Refeito a cada mudança de estrutura; se nada
+// mudou, não mexe (mexer à toa faria o terminal piscar).
 let arranjoAtual = '';
 function arrumarTela() {
-  const arranjo = linhas.map((l) => l.colunas.map((c) => c.id).join(',')).join('|');
+  const arranjo = linhas.map((l) => l.colunas.map((c) => c.celulas.map((cel) => cel.id).join('.')).join(',')).join('|');
   if (arranjo !== arranjoAtual) {
     arranjoAtual = arranjo;
     const recipiente = $('colunas');
-    for (const d of recipiente.querySelectorAll('.divisa-coluna, .divisa-entre-linhas')) d.remove();
+    for (const d of recipiente.querySelectorAll('.divisa-coluna, .divisa-entre-linhas, .divisa-celula')) d.remove();
     for (const linha of linhas) {
       if (linha !== linhas[0]) recipiente.appendChild(divisa('divisa-entre-linhas', arrastarDivisaDeLinhas));
       // moveBefore muda o lugar sem recriar o canvas: o desenho WebGL
@@ -210,6 +236,11 @@ function arrumarTela() {
         if (col !== linha.colunas[0]) linha.el.appendChild(divisa('divisa-coluna', arrastarDivisaDeColunas));
         if (linha.el.moveBefore && col.el.isConnected) linha.el.moveBefore(col.el, null);
         else linha.el.appendChild(col.el);
+        for (const cel of col.celulas) {
+          if (cel !== col.celulas[0]) col.el.appendChild(divisa('divisa-celula', arrastarDivisaDeCelulas));
+          if (col.el.moveBefore && cel.el.isConnected) col.el.moveBefore(cel.el, null);
+          else col.el.appendChild(cel.el);
+        }
       }
     }
   }
@@ -232,9 +263,10 @@ function repartirAoMeio(d) {
   const antes = d.previousElementSibling;
   const depois = d.nextElementSibling;
   if (!antes || !depois) return;
-  const ehLinha = d.classList.contains('divisa-entre-linhas');
-  const medida = (el) => el.getBoundingClientRect()[ehLinha ? 'height' : 'width'];
-  for (const el of d.parentElement.querySelectorAll(ehLinha ? ':scope > .linha' : ':scope > .coluna')) {
+  const emPe = d.classList.contains('divisa-coluna'); // divisa em pé reparte largura; deitada, altura
+  const irma = emPe ? '.coluna' : d.classList.contains('divisa-entre-linhas') ? '.linha' : '.celula';
+  const medida = (el) => el.getBoundingClientRect()[emPe ? 'width' : 'height'];
+  for (const el of d.parentElement.querySelectorAll(':scope > ' + irma)) {
     el.style.flexGrow = medida(el);
   }
   const meio = (medida(antes) + medida(depois)) / 2;
@@ -295,43 +327,72 @@ function arrastarDivisaDeLinhas(evInicio) {
   window.addEventListener('mouseup', soltar);
 }
 
-// ---------- zoom: uma coluna toma a área inteira e depois volta ----------
-// Duplo clique na aba (ou o item do menu) maximiza a coluna do terminal; de
-// novo, volta ao arranjo exato de antes. Mexeu na estrutura (mover, trocar,
-// fechar a coluna), o zoom desarma sozinho.
-
-function aplicarZoom() {
-  if (colunaZoom && !linhaDe(colunaZoom)) colunaZoom = null;
-  $('colunas').classList.toggle('zoom', !!colunaZoom);
-  for (const l of linhas) l.el.classList.toggle('tem-zoom', !!colunaZoom && l.colunas.includes(colunaZoom));
-  for (const c of todasAsColunas()) c.el.classList.toggle('zoom', c === colunaZoom);
+// E dentro da coluna: a divisa entre células muda a altura das duas vizinhas.
+function arrastarDivisaDeCelulas(evInicio) {
+  evInicio.preventDefault();
+  const cima = evInicio.currentTarget.previousElementSibling;
+  const baixo = evInicio.currentTarget.nextElementSibling;
+  if (!cima || !baixo) return;
+  for (const el of evInicio.currentTarget.parentElement.querySelectorAll(':scope > .celula')) {
+    el.style.flexGrow = el.getBoundingClientRect().height;
+  }
+  const hCima = cima.getBoundingClientRect().height;
+  const hBaixo = baixo.getBoundingClientRect().height;
+  const y0 = evInicio.clientY;
+  document.body.classList.add('arrastando-divisa-linha');
+  function mover(ev) {
+    const delta = Math.max(120 - hCima, Math.min(ev.clientY - y0, hBaixo - 120));
+    cima.style.flexGrow = hCima + delta;
+    baixo.style.flexGrow = hBaixo - delta;
+  }
+  function soltar() {
+    document.body.classList.remove('arrastando-divisa-linha');
+    window.removeEventListener('mousemove', mover);
+    window.removeEventListener('mouseup', soltar);
+  }
+  window.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', soltar);
 }
 
-function alternarZoom(col) {
-  colunaZoom = colunaZoom === col ? null : col;
+// ---------- zoom: uma célula toma a área inteira e depois volta ----------
+// Duplo clique na aba (ou o item do menu) maximiza a célula do terminal; de
+// novo, volta ao arranjo exato de antes. Mexeu na estrutura (mover, trocar,
+// fechar a célula), o zoom desarma sozinho.
+
+function aplicarZoom() {
+  if (celulaZoom && !colunaDe(celulaZoom)) celulaZoom = null;
+  $('colunas').classList.toggle('zoom', !!celulaZoom);
+  const colZoom = celulaZoom ? colunaDe(celulaZoom) : null;
+  for (const l of linhas) l.el.classList.toggle('tem-zoom', !!colZoom && l.colunas.includes(colZoom));
+  for (const c of todasAsColunas()) c.el.classList.toggle('tem-zoom', c === colZoom);
+  for (const cel of todasAsCelulas()) cel.el.classList.toggle('zoom', cel === celulaZoom);
+}
+
+function alternarZoom(cel) {
+  celulaZoom = celulaZoom === cel ? null : cel;
   aplicarZoom();
 }
 
 function sairDoZoom() {
-  if (colunaZoom) alternarZoom(colunaZoom);
+  if (celulaZoom) alternarZoom(celulaZoom);
 }
 
-// Leva o terminal pra outra coluna. moveBefore muda o lugar sem recriar o
+// Leva o terminal pra outra célula. moveBefore muda o lugar sem recriar o
 // canvas, então o desenho WebGL do xterm sobrevive à mudança.
-function moverTerminal(id, col) {
+function moverTerminal(id, cel) {
   const t = terminais.get(id);
-  if (!t || !col || t.col === col) return;
+  if (!t || !cel || t.cel === cel) return;
   sairDoZoom();
-  const origem = t.col;
-  t.col = col;
-  if (col.terminaisEl.moveBefore) col.terminaisEl.moveBefore(t.caixa, null);
-  else col.terminaisEl.appendChild(t.caixa);
-  const irmaos = idsDaColuna(origem);
+  const origem = t.cel;
+  t.cel = cel;
+  if (cel.terminaisEl.moveBefore) cel.terminaisEl.moveBefore(t.caixa, null);
+  else cel.terminaisEl.appendChild(t.caixa);
+  const irmaos = idsDaCelula(origem);
   if (!irmaos.length) {
     origem.ativo = null;
-    removerColuna(origem);
+    removerCelula(origem);
   } else if (origem.ativo === id) {
-    mostrarNaColuna(irmaos[irmaos.length - 1]);
+    mostrarNaCelula(irmaos[irmaos.length - 1]);
   }
   ativarTerminal(id);
 }
@@ -340,28 +401,34 @@ function moverTerminal(id, col) {
 function mostrarAoLado(id) {
   const t = terminais.get(id);
   if (!t) return;
-  moverTerminal(id, criarColuna(t.col));
+  moverTerminal(id, criarColunaAoLado(colunaDe(t.cel)));
 }
 
-// "Mostrar embaixo": o terminal ganha uma linha nova, logo abaixo da dele.
+// "Mostrar embaixo": o terminal ganha uma célula nova, logo abaixo da dele,
+// na mesma coluna.
 function mostrarEmbaixo(id) {
   const t = terminais.get(id);
   if (!t) return;
-  const linha = linhaDe(t.col);
-  if (idsDaColuna(t.col).length === 1 && linha.colunas.length === 1) return; // a linha já é só dele
-  moverTerminal(id, criarColunaEm(criarLinhaEm(linhas.indexOf(linha) + 1), 0));
+  if (idsDaCelula(t.cel).length === 1) return; // sozinho, cairia no mesmo lugar
+  const col = colunaDe(t.cel);
+  moverTerminal(id, criarCelulaEm(col, col.celulas.indexOf(t.cel) + 1));
 }
 
 // ---------- arrastar abas ----------
-// A aba se arrasta: solta na barra de outra coluna muda de coluna (e de
-// posição na fila), solta no meio de um terminal vai pra coluna dele, e solta
-// na beirada esquerda ou direita de um terminal vira uma coluna nova ali.
+// A aba se arrasta: solta na barra de outra célula muda de célula (e de
+// posição na fila), solta no meio de um terminal vai pra célula dele, solta
+// na beirada esquerda ou direita de um terminal vira uma coluna nova ali, e
+// na beirada de cima ou de baixo vira uma célula nova naquela coluna. A aba
+// do fliperama se arrasta igual — só não entra na fila, porque ela mora
+// sempre no fim da barra.
 
 const TIPO_ABA = 'application/x-bigorna-aba';
 const TIPO_COLUNA = 'application/x-bigorna-coluna';
+const TIPO_FLIPERAMA = 'application/x-bigorna-fliperama';
 let arrastandoAba = null; // id do terminal da aba arrastada
 let arrastandoColuna = null; // a coluna arrastada pela parte vazia da barra
-let soltarEm = null; // alvo da vez: { col, antesDe } na barra, { col, zona } no terminal, { colAlvo, zonaDaColuna } de coluna
+let arrastandoFliperama = false; // a aba do fliperama na mão do mouse
+let soltarEm = null; // alvo da vez: { cel, antesDe } na barra, { cel, zona } no terminal, { colAlvo, zonaDaColuna } de coluna
 
 // Muda o terminal de lugar na fila (a ordem do Map é a ordem das abas).
 // antesDe null é o fim da fila.
@@ -381,6 +448,7 @@ function reordenarTerminal(id, antesDe) {
 function limparArrasto() {
   arrastandoAba = null;
   arrastandoColuna = null;
+  arrastandoFliperama = false;
   soltarEm = null;
   $('sombra-de-soltar').hidden = true;
   for (const el of $('colunas').querySelectorAll('.arrastando')) el.classList.remove('arrastando');
@@ -458,27 +526,31 @@ function zonaDoPonto(ev, r) {
   return 'meio';
 }
 
-// A sombra de cada zona: meio e lados são pedaços da caixa; cima e baixo são
-// metades da linha inteira, porque a linha nova nasce com a largura toda.
+// A sombra de cada zona: meio e lados são pedaços da caixa. Cima e baixo
+// também, no arrasto de aba (a célula nova fica na coluna); no arrasto de
+// coluna vem o rLinha, e as metades são da linha inteira, porque a linha
+// nova nasce com a largura toda.
 function sombraDaZona(zona, rCaixa, rLinha) {
+  const rAlto = rLinha || rCaixa;
   if (zona === 'meio') mostrarSombra(rCaixa.x, rCaixa.y, rCaixa.width, rCaixa.height);
   else if (zona === 'esquerda') mostrarSombra(rCaixa.x, rCaixa.y, rCaixa.width / 2, rCaixa.height);
   else if (zona === 'direita') mostrarSombra(rCaixa.x + rCaixa.width / 2, rCaixa.y, rCaixa.width / 2, rCaixa.height);
-  else if (zona === 'cima') mostrarSombra(rLinha.x, rLinha.y, rLinha.width, rLinha.height / 2);
-  else mostrarSombra(rLinha.x, rLinha.y + rLinha.height / 2, rLinha.width, rLinha.height / 2);
+  else if (zona === 'cima') mostrarSombra(rAlto.x, rAlto.y, rAlto.width, rAlto.height / 2);
+  else mostrarSombra(rAlto.x, rAlto.y + rAlto.height / 2, rAlto.width, rAlto.height / 2);
 }
 
 $('colunas').addEventListener('dragover', (ev) => {
   const ehColuna = ev.dataTransfer.types.includes(TIPO_COLUNA);
-  if (!ehColuna && !ev.dataTransfer.types.includes(TIPO_ABA)) return;
-  const colEl = ev.target.closest('.coluna');
-  const col = todasAsColunas().find((c) => c.el === colEl);
-  if (!col) return;
+  const ehFliperama = ev.dataTransfer.types.includes(TIPO_FLIPERAMA);
+  if (!ehColuna && !ehFliperama && !ev.dataTransfer.types.includes(TIPO_ABA)) return;
 
   // coluna arrastada: o meio de outra coluna troca as duas, as beiradas dos
   // lados inserem ali, e cima/baixo viram uma linha nova (vale até nela mesma,
   // pra destacar a coluna da linha onde está)
   if (ehColuna) {
+    const colEl = ev.target.closest('.coluna');
+    const col = todasAsColunas().find((c) => c.el === colEl);
+    if (!col) return;
     const zona = zonaDoPonto(ev, col.el.getBoundingClientRect());
     const propria = col === arrastandoColuna;
     const viraLinha = zona === 'cima' || zona === 'baixo';
@@ -494,11 +566,15 @@ $('colunas').addEventListener('dragover', (ev) => {
     return;
   }
 
+  const celEl = ev.target.closest('.celula');
+  const cel = todasAsCelulas().find((c) => c.el === celEl);
+  if (!cel) return;
+
   ev.preventDefault();
   ev.dataTransfer.dropEffect = 'move';
 
   const barra = ev.target.closest('.abas');
-  if (barra) {
+  if (barra && !ehFliperama) {
     // na barra: a aba entra antes da aba sob o mouse (metade direita: depois)
     const abas = [...barra.querySelectorAll('.aba')];
     const aba = ev.target.closest('.aba');
@@ -520,22 +596,23 @@ $('colunas').addEventListener('dragover', (ev) => {
       const ultima = abas[abas.length - 1];
       x = ultima ? ultima.getBoundingClientRect().right : barra.getBoundingClientRect().x;
     }
-    soltarEm = { col, antesDe };
+    soltarEm = { cel, antesDe };
     const rBarra = barra.getBoundingClientRect();
     mostrarSombra(x - 1, rBarra.y, 2, rBarra.height);
     return;
   }
 
   // no terminal: beirada esquerda ou direita cria coluna, cima ou baixo cria
-  // linha, e o meio só muda de coluna
-  const r = col.terminaisEl.getBoundingClientRect();
-  const zona = zonaDoPonto(ev, r);
-  soltarEm = { col, zona };
-  sombraDaZona(zona, r, linhaDe(col).el.getBoundingClientRect());
+  // célula empilhada na coluna, e o meio só muda de célula. O fliperama em
+  // cima de uma barra também vale como o meio: ele não tem posição na fila.
+  const r = cel.terminaisEl.getBoundingClientRect();
+  const zona = barra ? 'meio' : zonaDoPonto(ev, r);
+  soltarEm = { cel, zona };
+  sombraDaZona(zona, r);
 });
 
 $('colunas').addEventListener('dragleave', (ev) => {
-  if (arrastandoAba === null && arrastandoColuna === null) return;
+  if (arrastandoAba === null && arrastandoColuna === null && !arrastandoFliperama) return;
   if (ev.relatedTarget && $('colunas').contains(ev.relatedTarget)) return;
   soltarEm = null;
   $('sombra-de-soltar').hidden = true;
@@ -543,7 +620,8 @@ $('colunas').addEventListener('dragleave', (ev) => {
 
 $('colunas').addEventListener('drop', (ev) => {
   const ehColuna = ev.dataTransfer.types.includes(TIPO_COLUNA);
-  if (!ehColuna && !ev.dataTransfer.types.includes(TIPO_ABA)) return;
+  const ehFliperama = ev.dataTransfer.types.includes(TIPO_FLIPERAMA);
+  if (!ehColuna && !ehFliperama && !ev.dataTransfer.types.includes(TIPO_ABA)) return;
   ev.preventDefault();
   ev.stopPropagation();
   const id = Number(ev.dataTransfer.getData(TIPO_ABA));
@@ -551,6 +629,35 @@ $('colunas').addEventListener('drop', (ev) => {
   const colArrastada = arrastandoColuna;
   limparArrasto();
   if (!alvo) return;
+
+  // o fliperama solto segue as mesmas zonas da aba de terminal, só que quem
+  // muda de lugar é o console — e sem posição na fila (barra vale meio)
+  if (ehFliperama) {
+    if (!fliperama || !alvo.cel) return;
+    const sozinho = !idsDaCelula(fliperama.cel).length; // a célula era só do jogo
+    if (alvo.zona === 'cima' || alvo.zona === 'baixo') {
+      const col = colunaDe(alvo.cel);
+      const indice = col.celulas.indexOf(alvo.cel) + (alvo.zona === 'baixo' ? 1 : 0);
+      if (sozinho && colunaDe(fliperama.cel) === col) {
+        const iOrigem = col.celulas.indexOf(fliperama.cel);
+        if (indice === iOrigem || indice === iOrigem + 1) return;
+      }
+      moverFliperama(criarCelulaEm(col, indice));
+    } else if (alvo.zona === 'esquerda' || alvo.zona === 'direita') {
+      const colAlvo = colunaDe(alvo.cel);
+      const linha = linhaDe(colAlvo);
+      const indice = linha.colunas.indexOf(colAlvo) + (alvo.zona === 'direita' ? 1 : 0);
+      const colDoJogo = colunaDe(fliperama.cel);
+      if (sozinho && colDoJogo.celulas.length === 1 && linhaDe(colDoJogo) === linha) {
+        const iOrigem = linha.colunas.indexOf(colDoJogo);
+        if (indice === iOrigem || indice === iOrigem + 1) return;
+      }
+      moverFliperama(criarColunaEm(linha, indice));
+    } else {
+      moverFliperama(alvo.cel); // meio (ou a barra): só muda de célula
+    }
+    return;
+  }
 
   if (ehColuna) {
     if (!colArrastada || !alvo.colAlvo) return;
@@ -569,61 +676,63 @@ $('colunas').addEventListener('drop', (ev) => {
   if (!t) return;
 
   if (alvo.zona === undefined) {
-    // na barra: entra na posição marcada; mudando de coluna, vai junto
+    // na barra: entra na posição marcada; mudando de célula, vai junto
     if (alvo.antesDe === id) return;
     reordenarTerminal(id, alvo.antesDe);
-    if (t.col === alvo.col) ativarTerminal(id); // já redesenha na ordem nova
-    else moverTerminal(id, alvo.col);
+    if (t.cel === alvo.cel) ativarTerminal(id); // já redesenha na ordem nova
+    else moverTerminal(id, alvo.cel);
     return;
   }
   if (alvo.zona === 'meio') {
-    if (t.col === alvo.col) ativarTerminal(id);
-    else moverTerminal(id, alvo.col);
+    if (t.cel === alvo.cel) ativarTerminal(id);
+    else moverTerminal(id, alvo.cel);
     return;
   }
   if (alvo.zona === 'cima' || alvo.zona === 'baixo') {
-    // beirada de cima ou de baixo: linha nova — menos quando a aba está
-    // sozinha numa linha só dela e cairia no mesmo lugar
-    const linha = linhaDe(alvo.col);
-    const indice = linhas.indexOf(linha) + (alvo.zona === 'baixo' ? 1 : 0);
-    if (idsDaColuna(t.col).length === 1 && linhaDe(t.col).colunas.length === 1) {
-      const iOrigem = linhas.indexOf(linhaDe(t.col));
+    // beirada de cima ou de baixo: célula nova empilhada na coluna da célula
+    // alvo — menos quando a aba está sozinha na dela e cairia no mesmo lugar
+    const col = colunaDe(alvo.cel);
+    const indice = col.celulas.indexOf(alvo.cel) + (alvo.zona === 'baixo' ? 1 : 0);
+    if (idsDaCelula(t.cel).length === 1 && colunaDe(t.cel) === col) {
+      const iOrigem = col.celulas.indexOf(t.cel);
       if (indice === iOrigem || indice === iOrigem + 1) return;
     }
-    moverTerminal(id, criarColunaEm(criarLinhaEm(indice), 0));
+    moverTerminal(id, criarCelulaEm(col, indice));
     return;
   }
   // beirada dos lados: coluna nova no lado escolhido — menos quando a aba
-  // está sozinha na própria coluna e cairia no mesmo lugar
-  const linha = linhaDe(alvo.col);
-  const indice = linha.colunas.indexOf(alvo.col) + (alvo.zona === 'direita' ? 1 : 0);
-  if (idsDaColuna(t.col).length === 1 && linhaDe(t.col) === linha) {
-    const iOrigem = linha.colunas.indexOf(t.col);
+  // está sozinha numa coluna só da célula dela e cairia no mesmo lugar
+  const colAlvo = colunaDe(alvo.cel);
+  const linha = linhaDe(colAlvo);
+  const indice = linha.colunas.indexOf(colAlvo) + (alvo.zona === 'direita' ? 1 : 0);
+  const colDaAba = colunaDe(t.cel);
+  if (idsDaCelula(t.cel).length === 1 && colDaAba.celulas.length === 1 && linhaDe(colDaAba) === linha) {
+    const iOrigem = linha.colunas.indexOf(colDaAba);
     if (indice === iOrigem || indice === iOrigem + 1) return;
   }
   moverTerminal(id, criarColunaEm(linha, indice));
 }, true); // na captura: passa na frente do soltar de caminho do terminal
 
-async function criarTerminal(pasta, col) {
+async function criarTerminal(pasta, cel) {
   $('shell-fim').hidden = true;
-  if (!col || !linhaDe(col)) col = (colunaAtiva && linhaDe(colunaAtiva) && colunaAtiva) || todasAsColunas()[0] || criarColuna();
+  if (!cel || !colunaDe(cel)) cel = (celulaAtiva && colunaDe(celulaAtiva) && celulaAtiva) || todasAsCelulas()[0] || criarColunaNoFim();
 
   // Sem pasta pedida (+, duplo clique na barra), a aba nova nasce na pasta
-  // do terminal à mostra na coluna — igual ao Konsole, que segue a pasta
+  // do terminal à mostra na célula — igual ao Konsole, que segue a pasta
   // atual. Sem nenhum terminal aberto, vale a casa (ou o pedido de fora).
-  if (pasta === undefined) pasta = terminais.get(col.ativo)?.info?.cwd ?? terminalDaVez()?.info?.cwd;
+  if (pasta === undefined) pasta = terminais.get(cel.ativo)?.info?.cwd ?? terminalDaVez()?.info?.cwd;
 
   const id = proximoTerminal++;
   const caixa = document.createElement('div');
   caixa.className = 'terminal-caixa';
-  col.terminaisEl.appendChild(caixa);
+  cel.terminaisEl.appendChild(caixa);
 
-  // Clicar num terminal já à mostra passa o teclado (e a coluna da vez) pra
+  // Clicar num terminal já à mostra passa o teclado (e a célula da vez) pra
   // ele; o foco em si quem dá é o próprio xterm, pelo mesmo clique.
   caixa.addEventListener('mousedown', () => {
     if (terminalAtivo === id || !terminais.has(id)) return;
     terminalAtivo = id;
-    colunaAtiva = terminais.get(id).col;
+    celulaAtiva = terminais.get(id).cel;
     desenharAbas();
   });
 
@@ -723,7 +832,7 @@ async function criarTerminal(pasta, col) {
 
   // Nenhum atalho próprio: tudo vai pro bash. As únicas exceções são as
   // mesmas do Konsole: Ctrl+Shift+C copia, Ctrl+Shift+V cola, Ctrl+Shift+F
-  // abre a busca, Ctrl+Shift+T abre outro terminal na coluna e
+  // abre a busca, Ctrl+Shift+T abre outro terminal na célula e
   // Ctrl+Shift+K limpa o rolo da tela.
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true;
@@ -744,7 +853,7 @@ async function criarTerminal(pasta, col) {
       return false;
     }
     if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyT') {
-      criarTerminal(undefined, terminais.get(id)?.col);
+      criarTerminal(undefined, terminais.get(id)?.cel);
       ev.preventDefault();
       return false;
     }
@@ -778,14 +887,14 @@ async function criarTerminal(pasta, col) {
   // branco. Trazer o terminal pra frente apaga a marca.
   term.onBell(() => {
     const t = terminais.get(id);
-    if (!t || t.col.ativo === id || t.sino) return;
+    if (!t || t.cel.ativo === id || t.sino) return;
     t.sino = true;
     desenharAbas();
   });
 
   // Entra no mapa antes do bash nascer, senão a primeira letra do prompt
   // poderia chegar sem ter quem a receba.
-  terminais.set(id, { term, fit, caixa, busca, info: null, nome: null, col, sino: false });
+  terminais.set(id, { term, fit, caixa, busca, info: null, nome: null, cel, sino: false });
   term.onData((data) => window.api.ptyWrite(id, data));
 
   fit.fit();
@@ -801,14 +910,14 @@ async function criarTerminal(pasta, col) {
   return id;
 }
 
-// Põe o terminal à mostra na coluna dele, sem mexer no teclado.
-function mostrarNaColuna(id) {
+// Põe o terminal à mostra na célula dele, sem mexer no teclado.
+function mostrarNaCelula(id) {
   const t = terminais.get(id);
   if (!t) return;
-  t.col.ativo = id;
+  t.cel.ativo = id;
   t.sino = false; // à mostra, o apito já foi visto
   for (const [outro, o] of terminais) {
-    if (o.col === t.col) o.caixa.classList.toggle('escondida', outro !== id);
+    if (o.cel === t.cel) o.caixa.classList.toggle('escondida', outro !== id);
   }
   // o tamanho pode ter mudado enquanto a aba estava escondida
   requestAnimationFrame(() => {
@@ -822,8 +931,8 @@ function ativarTerminal(id) {
   if (!t) return;
   if (buscaNo !== null && buscaNo !== id) fecharBusca(true); // a busca era de outro terminal
   terminalAtivo = id;
-  colunaAtiva = t.col;
-  mostrarNaColuna(id);
+  celulaAtiva = t.cel;
+  mostrarNaCelula(id);
   requestAnimationFrame(() => t.term.focus());
   desenharAbas();
 }
@@ -837,17 +946,17 @@ function fecharTerminal(id, jaEncerrou) {
   if (!jaEncerrou) window.api.ptyKill(id);
   t.term.dispose();
   t.caixa.remove();
-  const irmaos = idsDaColuna(t.col);
+  const irmaos = idsDaCelula(t.cel);
   if (!irmaos.length) {
-    t.col.ativo = null;
-    removerColuna(t.col); // se era a última coluna, ela fica, vazia
-  } else if (t.col.ativo === id) {
-    mostrarNaColuna(irmaos[irmaos.length - 1]);
+    t.cel.ativo = null;
+    removerCelula(t.cel); // se era a última célula, ela fica, vazia
+  } else if (t.cel.ativo === id) {
+    mostrarNaCelula(irmaos[irmaos.length - 1]);
   }
   if (terminalAtivo === id) {
     terminalAtivo = null;
-    // o teclado vai pro terminal à mostra na mesma coluna, ou na da vez
-    const prox = (linhaDe(t.col) && t.col.ativo) || (colunaAtiva && colunaAtiva.ativo);
+    // o teclado vai pro terminal à mostra na mesma célula, ou na da vez
+    const prox = (colunaDe(t.cel) && t.cel.ativo) || (celulaAtiva && celulaAtiva.ativo);
     if (prox) return ativarTerminal(prox); // ele já redesenha as abas
   }
   desenharAbas();
@@ -894,7 +1003,7 @@ setInterval(() => {
 function abaDoTerminal(id) {
   const t = terminais.get(id);
   const aba = document.createElement('span');
-  aba.className = 'aba' + (id === t.col.ativo ? ' ativa' : '') + (id === abaDoMenu ? ' alvo-do-menu' : '');
+  aba.className = 'aba' + (id === t.cel.ativo ? ' ativa' : '') + (id === abaDoMenu ? ' alvo-do-menu' : '');
   aba.dados = { id };
   if (t.info && t.info.programa === 'claude') {
     const marca = document.createElement('span');
@@ -930,11 +1039,11 @@ function abaDoTerminal(id) {
     ev.preventDefault();
     fecharTerminal(id);
   });
-  // duplo clique: a coluna do terminal toma a área inteira; de novo, volta
+  // duplo clique: a célula do terminal toma a área inteira; de novo, volta
   aba.addEventListener('dblclick', (ev) => {
     ev.stopPropagation(); // senão a barra entenderia como "abrir outro terminal"
     const dono = terminais.get(id);
-    if (dono) alternarZoom(dono.col);
+    if (dono) alternarZoom(dono.cel);
   });
   aba.draggable = true;
   aba.addEventListener('dragstart', (ev) => {
@@ -955,19 +1064,19 @@ function abaDoTerminal(id) {
 function desenharAbas() {
   // redesenhar com a caixa de renomear aberta apagaria o que está sendo
   // digitado; no meio de um arrasto, sumiria com a aba da mão do mouse
-  if ($('colunas').querySelector('.abas input') || arrastandoAba !== null) return;
+  if ($('colunas').querySelector('.abas input') || arrastandoAba !== null || arrastandoFliperama) return;
 
-  for (const col of todasAsColunas()) {
-    col.el.classList.toggle('foco', col === colunaAtiva);
+  for (const cel of todasAsCelulas()) {
+    cel.el.classList.toggle('foco', cel === celulaAtiva);
     // o terminal à mostra leva a cor do repositório dele num fio no topo
-    const ativo = terminais.get(col.ativo);
-    if (ativo && ativo.info && ativo.info.repo) col.el.style.setProperty('--cor', corDoGrupo(ativo.info.repo));
-    else col.el.style.removeProperty('--cor'); // sem repositório, a moldura fica no cinza padrão
+    const ativo = terminais.get(cel.ativo);
+    if (ativo && ativo.info && ativo.info.repo) cel.el.style.setProperty('--cor', corDoGrupo(ativo.info.repo, ativo.info.cor));
+    else cel.el.style.removeProperty('--cor'); // sem repositório, a moldura fica no cinza padrão
 
     const grupos = new Map(); // repositório → abas dele, na ordem de abertura
     const soltas = [];
     for (const [id, t] of terminais) {
-      if (t.col !== col) continue;
+      if (t.cel !== cel) continue;
       if (t.info && t.info.repo) {
         if (!grupos.has(t.info.repo)) grupos.set(t.info.repo, []);
         grupos.get(t.info.repo).push(id);
@@ -980,7 +1089,7 @@ function desenharAbas() {
     for (const [repo, ids] of grupos) {
       const grupo = document.createElement('div');
       grupo.className = 'grupo';
-      grupo.style.setProperty('--cor', corDoGrupo(repo));
+      grupo.style.setProperty('--cor', corDoGrupo(repo, terminais.get(ids[0]).info.cor));
       const etiqueta = document.createElement('span');
       etiqueta.className = 'etiqueta';
       etiqueta.textContent = terminais.get(ids[0]).info.nome;
@@ -991,10 +1100,10 @@ function desenharAbas() {
       novas.appendChild(grupo);
     }
     for (const id of soltas) novas.appendChild(abaDoTerminal(id));
-    if (temFliperama(col)) novas.appendChild(abaDoFliperama());
-    col.listaEl.replaceChildren(novas);
+    if (temFliperama(cel)) novas.appendChild(abaDoFliperama());
+    cel.listaEl.replaceChildren(novas);
   }
-  arrumarFliperama(); // em pé ou deitado, conforme a coluna dele tenha terminal
+  arrumarFliperama(); // em pé ou deitado, conforme a célula dele tenha terminal
   atualizarFora(); // o terminal da vez pode ter mudado de pasta, ou outro virou a vez
 
   // O título da janela acompanha a aba da vez: no alt-tab e na barra de
@@ -1034,7 +1143,7 @@ function abrirBusca(id) {
   if (!t) return;
   if (buscaNo !== null && buscaNo !== id) fecharBusca(true);
   buscaNo = id;
-  t.caixa.appendChild($('busca')); // acompanha o terminal se ele mudar de coluna
+  t.caixa.appendChild($('busca')); // acompanha o terminal se ele mudar de célula
   $('busca').hidden = false;
   $('busca-texto').focus();
   $('busca-texto').select();
@@ -1154,10 +1263,38 @@ function linhaDaArvore(caminho, nome, ehPasta, nivel) {
   el.draggable = true;
   el.addEventListener('dragstart', (ev) => {
     ev.preventDefault(); // o arrasto do HTML sai de cena; quem assume é o do sistema
-    window.api.arrastarArquivo(caminho);
+    // um item marcado (Ctrl+clique) leva a seleção inteira junto
+    window.api.arrastarArquivo(selecionados.has(caminho) ? [...selecionados] : caminho);
   });
+  if (selecionados.has(caminho)) el.classList.add('selecionado'); // a marca sobrevive à releitura
   return el;
 }
+
+// ---------- seleção de vários (Ctrl+clique) ----------
+// Ctrl+clique marca e desmarca itens nas metades das pastas; arrastar um
+// item marcado leva todos juntos (mover, copiar ou lixeira de uma vez).
+// Clique comum em qualquer lugar da lateral desmarca tudo.
+
+const selecionados = new Set(); // caminhos marcados
+
+function limparSelecao() {
+  if (!selecionados.size) return;
+  selecionados.clear();
+  for (const el of document.querySelectorAll('#lateral .item.selecionado')) el.classList.remove('selecionado');
+}
+
+$('lateral').addEventListener('click', (ev) => {
+  if (!ev.ctrlKey) return limparSelecao(); // clique comum: desmarca e segue o caminho normal
+  const linha = ev.target.closest('.item');
+  if (!linha || !linha.dados?.caminho) return;
+  ev.preventDefault();
+  ev.stopPropagation(); // o Ctrl+clique só marca: não abre nem fecha nada
+  if (selecionados.delete(linha.dados.caminho)) linha.classList.remove('selecionado');
+  else {
+    selecionados.add(linha.dados.caminho);
+    linha.classList.add('selecionado');
+  }
+}, true); // na captura: passa na frente do abrir do item
 
 function marcarAtivo(linha) {
   if (itemAtivo) itemAtivo.classList.remove('aberto-no-editor');
@@ -1360,6 +1497,78 @@ $('btn-ocultos').addEventListener('click', () => {
   if ($('filtro').value) aplicarFiltro(); // a conta do filtro muda junto
 });
 
+// ---------- a lixeira do sistema, cuidada pela própria Bigorna ----------
+// O botão "lixeira" abre a metade [lixeira]: o que está em
+// ~/.local/share/Trash, o mais novo em cima — sem Dolphin na máquina, é a
+// Bigorna quem mostra, restaura e esvazia. Botão direito num item: restaurar
+// pro caminho de onde veio, ou excluir de vez. Soltar um arrasto na metade
+// manda o item pra lixeira. O vigia de files/ mantém a lista em dia
+// enquanto a metade está aberta.
+
+const pastaDaLixeira = () => casa + '/.local/share/Trash/files';
+
+async function montarLixeira() {
+  const itens = await window.api.lixeiraLista().catch(() => []);
+  $('lixeira-conta').textContent = itens.length ? String(itens.length) : 'vazia';
+  const novas = document.createDocumentFragment();
+  for (const item of itens) {
+    const nome = item.origem.slice(item.origem.lastIndexOf('/') + 1);
+    const el = document.createElement('div');
+    el.className = 'item' + (nome.startsWith('.') ? ' oculto' : '');
+    el.style.paddingLeft = '8px';
+    el.innerHTML = icone(nome, item.ehPasta) + '<span></span>';
+    el.querySelector('span').textContent = nome;
+    el.title = `veio de ${pastaDe(item.origem) || '/'} — ${item.data.replace('T', ' ')}`;
+    el.dados = { naLixeira: item.id, nome }; // sem caminho nem ehPasta: a linha não abre nem recebe soltar
+    novas.appendChild(el);
+  }
+  $('arvore-lixeira').replaceChildren(novas);
+}
+
+$('btn-lixeira').addEventListener('click', () => {
+  const abrir = $('lixeira').hidden;
+  $('lixeira').hidden = !abrir;
+  if (abrir) {
+    montarLixeira();
+    window.api.vigiarPasta(pastaDaLixeira());
+  } else {
+    window.api.desvigiarPasta(pastaDaLixeira());
+  }
+});
+
+$('btn-esvaziar').addEventListener('click', async () => {
+  const r = await window.api.lixeiraEsvaziar().catch(() => ({ erro: 'esvaziar' }));
+  if (r.erro) return avisar('não consegui esvaziar a lixeira');
+  if (!r.cancelado) montarLixeira();
+});
+
+window.api.onPastaMudou((dir) => {
+  if (!$('lixeira').hidden && dir === pastaDaLixeira()) montarLixeira();
+});
+
+function itensDaLixeira(id) {
+  return [
+    {
+      texto: 'Restaurar (volta pra onde estava)',
+      acao: async () => {
+        const r = await window.api.lixeiraRestaurar(id).catch(() => ({ erro: 'restaurar' }));
+        if (r.erro === 'existe') return avisar('já existe um com esse nome no lugar de origem');
+        if (r.erro === 'disco') return avisar('o lugar de origem está noutro disco — não deu');
+        if (r.erro) return avisar('não consegui restaurar');
+        montarLixeira();
+      },
+    },
+    {
+      texto: 'Excluir de vez…',
+      acao: async () => {
+        const r = await window.api.lixeiraExcluir(id).catch(() => ({ erro: 'excluir' }));
+        if (r.erro) return avisar('não consegui excluir');
+        if (!r.cancelado) montarLixeira();
+      },
+    },
+  ];
+}
+
 // ---------- filtro no pé da lateral ----------
 // Digitar esconde o que não casa com o texto, nas duas metades. Pasta
 // aberta fica à mostra se algum filho casar; pasta fechada só pelo nome
@@ -1400,6 +1609,79 @@ $('filtro').addEventListener('keydown', (ev) => {
 });
 
 // ============================================================
+// SOLTAR NA LATERAL: arrastar pra cima de uma pasta move o item pra
+// dentro dela, igual ao Dolphin fazia
+// ============================================================
+// O arrasto é o nativo do sistema (o mesmo que leva pro WhatsApp e pro
+// terminal), então também serve pra reorganizar aqui dentro — e aceita até
+// arquivo vindo de fora da Bigorna. Só pasta recebe; o vazio da árvore
+// recebe pra raiz daquela metade. O vigia da pasta recarrega a tela sozinho.
+
+let alvoDeSoltar = null; // o que está aceso debaixo do arrasto
+
+// Em que pasta o soltar cairia: numa linha de pasta, nela; no vazio da
+// árvore, na raiz da metade (casa ou a base do [fora]); na metade da
+// lixeira, vira "mover pra lixeira". Linha de arquivo não recebe, senão
+// todo canto viraria alvo e o mover sairia sem querer.
+function pastaDoSoltar(ev) {
+  if (ev.target.closest('#lixeira')) return { el: $('arvore-lixeira'), praLixeira: true };
+  const linha = ev.target.closest('.item');
+  if (linha) return linha.dados?.ehPasta && linha.dados.caminho ? { el: linha, pasta: linha.dados.caminho } : null;
+  if (ev.target.id !== 'arvore' && ev.target.id !== 'arvore-fora') return null;
+  const raiz = ev.target.id === 'arvore' ? casa
+    : [...pastasLidas].find(([, dados]) => dados.recipiente === ev.target && dados.nivel === 0)?.[0];
+  return raiz ? { el: ev.target, pasta: raiz } : null;
+}
+
+$('lateral').addEventListener('dragover', (ev) => {
+  if (!ev.dataTransfer.types.includes('Files')) return;
+  const alvo = pastaDoSoltar(ev);
+  if (alvoDeSoltar && alvoDeSoltar !== alvo?.el) alvoDeSoltar.classList.remove('alvo-de-soltar');
+  alvoDeSoltar = alvo ? alvo.el : null;
+  if (!alvo) return;
+  alvo.el.classList.add('alvo-de-soltar');
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = ev.ctrlKey && !alvo.praLixeira ? 'copy' : 'move'; // Ctrl copia
+});
+
+$('lateral').addEventListener('dragleave', (ev) => {
+  if (ev.relatedTarget && $('lateral').contains(ev.relatedTarget)) return;
+  if (alvoDeSoltar) alvoDeSoltar.classList.remove('alvo-de-soltar');
+  alvoDeSoltar = null;
+});
+
+$('lateral').addEventListener('drop', async (ev) => {
+  if (alvoDeSoltar) alvoDeSoltar.classList.remove('alvo-de-soltar');
+  alvoDeSoltar = null;
+  const alvo = pastaDoSoltar(ev);
+  const origens = [...ev.dataTransfer.files].map((f) => window.api.caminhoDoArquivo(f)).filter(Boolean);
+  if (!alvo || !origens.length) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const copiar = ev.ctrlKey && !alvo.praLixeira; // Ctrl apertado: copia em vez de mover
+  const erros = [];
+  for (const origem of origens) {
+    const r = alvo.praLixeira
+      ? await window.api.lixeira(origem).catch(() => ({ erro: 'lixeira' }))
+      : copiar
+        ? await window.api.copiarPara(origem, alvo.pasta).catch(() => ({ erro: 'copiar' }))
+        : await window.api.mover(origem, alvo.pasta).catch(() => ({ erro: 'mover' }));
+    if (r && r.erro && r.erro !== 'mesmo') erros.push(r.erro); // "já estava ali" não é erro
+  }
+  limparSelecao(); // depois do soltar, os caminhos marcados já mudaram de lugar
+  if (!erros.length) return;
+  const AVISO = {
+    existe: 'já existe um com esse nome aí dentro',
+    dentro: 'a pasta não cabe dentro dela mesma',
+    lixeira: 'não consegui mover pra lixeira',
+    copiar: 'não consegui copiar',
+    mover: 'não consegui mover',
+  };
+  if (origens.length === 1) return avisar(AVISO[erros[0]] || 'não deu');
+  avisar(`${erros.length} de ${origens.length} ficaram: ${AVISO[erros[0]] || 'não deu'}`);
+});
+
+// ============================================================
 // SOLTAR NO TERMINAL: arquivo (da lateral ou de fora) vira o caminho
 // no prompt, igual ao Konsole
 // ============================================================
@@ -1433,10 +1715,10 @@ $('terminal-area').addEventListener('dragover', (ev) => {
 $('terminal-area').addEventListener('drop', (ev) => {
   const solto = ev.dataTransfer.files[0];
   const caminho = solto ? window.api.caminhoDoArquivo(solto) : null;
-  // o caminho vai pro terminal da coluna onde o mouse soltou
-  const colEl = ev.target.closest('.coluna');
-  const col = todasAsColunas().find((c) => c.el === colEl) || colunaAtiva;
-  const t = (col && terminais.get(col.ativo)) || terminalDaVez();
+  // o caminho vai pro terminal da célula onde o mouse soltou
+  const celEl = ev.target.closest('.celula');
+  const cel = todasAsCelulas().find((c) => c.el === celEl) || celulaAtiva;
+  const t = (cel && terminais.get(cel.ativo)) || terminalDaVez();
   if (!caminho || !t) return;
   ev.preventDefault();
   ev.stopPropagation();
@@ -1444,9 +1726,9 @@ $('terminal-area').addEventListener('drop', (ev) => {
   // e o Claude Code pedem), ele recebe como colagem e não executa nada sozinho.
   t.term.paste(caminhoProBash(caminho) + ' ');
   t.term.focus();
-  if (col && terminalAtivo !== col.ativo) {
-    terminalAtivo = col.ativo;
-    colunaAtiva = col;
+  if (cel && terminalAtivo !== cel.ativo) {
+    terminalAtivo = cel.ativo;
+    celulaAtiva = cel;
     desenharAbas();
   }
 }, true);
@@ -1550,10 +1832,12 @@ function itensDoMenu(linha, opcoes) {
     },
     '-',
     { texto: 'Renomear…', icone: ic.renomear, acao: () => renomear(linha) },
+    { texto: 'Duplicar', icone: ic.duplicar, acao: () => duplicar(linha) },
     { texto: 'Mover pra lixeira', icone: ic.lixeira, acao: () => apagar(linha, 'lixeira') },
     { texto: 'Excluir de vez…', icone: ic.excluir, acao: () => apagar(linha, 'excluir') },
     '-',
     { texto: 'Compactar (.zip)', icone: ic.compactar, acao: () => compactar(linha) },
+    opcoes.compactado && { texto: 'Extrair aqui', icone: ic.extrair, acao: () => extrair(linha) },
     opcoes.audio && { texto: 'Transcrever áudio', icone: ic.transcrever, acao: () => window.api.transcrever(caminho) },
     '-',
     { texto: 'Propriedades', icone: ic.propriedades, acao: () => window.api.propriedades(caminho) },
@@ -1565,6 +1849,13 @@ $('lateral').addEventListener('contextmenu', async (ev) => {
   if (!linha || !linha.dados || linha.querySelector('input')) return;
   ev.preventDefault();
   fecharMenu();
+  // item da lixeira tem menu próprio: restaurar ou sumir de vez
+  if (linha.dados.naLixeira) {
+    linha.classList.add('alvo-do-menu');
+    menuAberto = { raiz: desenharMenu(itensDaLixeira(linha.dados.naLixeira), true), sub: null };
+    posicionar(menuAberto.raiz, ev.clientX, ev.clientY);
+    return;
+  }
   const pedido = pedidosDeMenu;
   linha.classList.add('alvo-do-menu');
   const opcoes = await window.api.opcoesDoMenu(linha.dados.caminho, linha.dados.ehPasta);
@@ -1602,20 +1893,24 @@ function itensDaAba(id) {
   const t = terminais.get(id);
   const branch = t.info && t.info.branch;
   const ic = iconesDaAba || {};
-  const linha = linhaDe(t.col);
-  const i = linha.colunas.indexOf(t.col);
-  const sozinho = idsDaColuna(t.col).length === 1;
+  const col = colunaDe(t.cel);
+  const linha = linhaDe(col);
+  const i = linha.colunas.indexOf(col);
+  const j = col.celulas.indexOf(t.cel);
+  const sozinho = idsDaCelula(t.cel).length === 1;
   return [
-    // sozinho na coluna, mostrar ao lado não muda nada: fica desligado
-    // (e sozinho numa linha só dele, mostrar embaixo também não)
-    { texto: 'Mostrar ao lado', icone: ic.lado, desligado: sozinho, acao: () => mostrarAoLado(id) },
-    { texto: 'Mostrar embaixo', icone: ic.embaixo, desligado: sozinho && linha.colunas.length === 1, acao: () => mostrarEmbaixo(id) },
-    { texto: 'Mover pra coluna da esquerda', icone: ic.esquerda, desligado: i < 1, acao: () => moverTerminal(id, linha.colunas[i - 1]) },
-    { texto: 'Mover pra coluna da direita', icone: ic.direita, desligado: i === linha.colunas.length - 1, acao: () => moverTerminal(id, linha.colunas[i + 1]) },
+    // sozinho numa coluna só da célula dele, mostrar ao lado não muda nada:
+    // fica desligado (e sozinho na célula, mostrar embaixo também não)
+    { texto: 'Mostrar ao lado', icone: ic.lado, desligado: sozinho && col.celulas.length === 1, acao: () => mostrarAoLado(id) },
+    { texto: 'Mostrar embaixo', icone: ic.embaixo, desligado: sozinho, acao: () => mostrarEmbaixo(id) },
+    { texto: 'Mover pra coluna da esquerda', icone: ic.esquerda, desligado: i < 1, acao: () => moverTerminal(id, linha.colunas[i - 1].celulas[0]) },
+    { texto: 'Mover pra coluna da direita', icone: ic.direita, desligado: i === linha.colunas.length - 1, acao: () => moverTerminal(id, linha.colunas[i + 1].celulas[0]) },
+    { texto: 'Mover pra célula de cima', icone: ic.cima, desligado: j < 1, acao: () => moverTerminal(id, col.celulas[j - 1]) },
+    { texto: 'Mover pra célula de baixo', icone: ic.baixo, desligado: j === col.celulas.length - 1, acao: () => moverTerminal(id, col.celulas[j + 1]) },
     '-',
-    colunaZoom === t.col
-      ? { texto: 'Voltar do zoom', icone: ic.zoom, acao: () => alternarZoom(t.col) }
-      : { texto: 'Ocupar a área toda', icone: ic.zoom, desligado: todasAsColunas().length < 2, acao: () => alternarZoom(t.col) },
+    celulaZoom === t.cel
+      ? { texto: 'Voltar do zoom', icone: ic.zoom, acao: () => alternarZoom(t.cel) }
+      : { texto: 'Ocupar a área toda', icone: ic.zoom, desligado: todasAsCelulas().length < 2, acao: () => alternarZoom(t.cel) },
     '-',
     branch && !BRANCHES_DA_PRINCIPAL.includes(branch)
       ? { texto: `Abrir worktree de ${branch}`, icone: ic.worktree, acao: () => abrirWorktree(id) }
@@ -1652,7 +1947,7 @@ async function abrirWorktree(id) {
   if (!t || !t.info || !t.info.cwd) return;
   const r = await window.api.abrirWorktree(t.info.cwd).catch(() => ({ erro: 'falhou' }));
   if (r.erro) return avisar(ERRO_DA_WORKTREE[r.erro] || 'não consegui abrir a worktree');
-  await criarTerminal(r.caminho, t.col); // na mesma coluna da aba de origem
+  await criarTerminal(r.caminho, t.cel); // na mesma célula da aba de origem
   atualizarInfo(id); // a aba de origem já está em outra branch
 }
 
@@ -1719,6 +2014,22 @@ async function compactar(linha) {
   const { caminho } = linha.dados;
   const r = await window.api.compactar(caminho).catch(() => ({ erro: 'falhou' }));
   if (r.erro) return avisar('não consegui compactar');
+  await recarregarPasta(pastaDe(caminho));
+}
+
+// O caminho de volta: o compactado vira uma pasta ao lado, com o nome dele.
+async function extrair(linha) {
+  const { caminho } = linha.dados;
+  const r = await window.api.extrair(caminho).catch(() => ({ erro: 'falhou' }));
+  if (r.erro) return avisar('não consegui extrair');
+  await recarregarPasta(pastaDe(caminho));
+}
+
+// "nota.txt" ganha uma "nota (cópia).txt" do lado, igual ao Dolphin.
+async function duplicar(linha) {
+  const { caminho } = linha.dados;
+  const r = await window.api.duplicar(caminho).catch(() => ({ erro: 'falhou' }));
+  if (r.erro) return avisar('não consegui duplicar');
   await recarregarPasta(pastaDe(caminho));
 }
 
@@ -2065,11 +2376,12 @@ function ligarZoomDaImagem(img) {
 // baixado uma vez pelo processo principal e fica guardado — daí em diante o
 // jogo abre sem internet.
 // O fliperama entra sempre pela direita, com uma aba própria na barra da
-// coluna. Com uma coluna só, ele vira uma coluna nova ao lado dela, em pé:
-// prateleira em cima, tela embaixo, atalhos no pé. Com terminal na coluna
-// dele, entra na metade de baixo, deitado: tela à esquerda, prateleira e
-// atalhos à direita, com a divisa arrastável. Fechar o último terminal da
-// coluna devolve a coluna inteira pra ele.
+// célula. Com uma célula só, ele vira uma coluna nova ao lado dela, em pé:
+// tela em cima, atalhos no pé. Com terminal na célula dele, entra na metade
+// de baixo, deitado: tela à esquerda, atalhos à direita, com a divisa
+// arrastável. A prateleira é uma gaveta por cima da tela, encostada na
+// direita (ctrl+e abre e fecha). Fechar o último terminal da célula devolve
+// a célula inteira pra ele.
 
 const CORE_DO_JOGO = [
   [/\.(sfc|smc|fig)$/i, 'snes9x'],              // Super Nintendo
@@ -2089,9 +2401,9 @@ const FORMATO_DA_TELA = {
 let jogo = null;       // emulador rodando agora, se houver
 let jogoPedido = null; // arquivo que está sendo preparado (o clique pode mudar no meio)
 let jogoAtual = null;  // o que está rodando: é dele o ponto que se salva
-let fliperama = null;  // o aparelho na tela: { col, el, divisa, tela, rotulo, prateleira }
+let fliperama = null;  // o aparelho na tela: { cel, el, divisa, tela, rotulo, prateleira }
 
-const temFliperama = (col) => !!fliperama && fliperama.col === col;
+const temFliperama = (cel) => !!fliperama && fliperama.cel === cel;
 
 // O ponto fica em disco, um por jogo. Sair guarda; abrir de novo continua dali.
 async function guardarPonto() {
@@ -2164,29 +2476,46 @@ function botaoDaMesa(texto, aoClicar, tecla) {
   return b;
 }
 
-// A coluna onde o fliperama entra: a última, se já houver mais de uma (ou se
-// ela estiver sem terminal); senão uma nova, à direita da única que existe.
-function colunaDoFliperama() {
-  const todas = todasAsColunas();
+// A célula onde o fliperama entra: a última, se já houver mais de uma (ou se
+// ela estiver sem terminal); senão uma coluna nova, à direita da única que existe.
+function celulaDoFliperama() {
+  const todas = todasAsCelulas();
   const ultima = todas[todas.length - 1];
-  if (ultima && (todas.length > 1 || !idsDaColuna(ultima).length)) return ultima;
-  return criarColuna();
+  if (ultima && (todas.length > 1 || !idsDaCelula(ultima).length)) return ultima;
+  return criarColunaNoFim();
 }
 
-// Em pé ou deitado, conforme a coluna tenha ou não terminal. Chamado pelo
-// desenharAbas, que já roda a cada mudança de terminal ou de coluna.
+// Leva o console pra outra célula (o arrasto da aba dele). A célula que era
+// só do jogo vai embora junto, igual à de um terminal que se mudou.
+function moverFliperama(cel) {
+  if (!fliperama || !cel || fliperama.cel === cel) return;
+  sairDoZoom();
+  const origem = fliperama.cel;
+  fliperama.cel = cel;
+  origem.el.classList.remove('fl-inteira');
+  cel.el.append(fliperama.divisa, fliperama.el);
+  if (!idsDaCelula(origem).length) {
+    origem.ativo = null;
+    removerCelula(origem);
+  }
+  desenharAbas(); // a aba muda de barra, e o jogo se arruma em pé ou deitado
+  fliperama.tela.focus();
+}
+
+// Em pé ou deitado, conforme a célula tenha ou não terminal. Chamado pelo
+// desenharAbas, que já roda a cada mudança de terminal ou de célula.
 function arrumarFliperama() {
   if (!fliperama) return;
-  const { col, el, divisa } = fliperama;
-  const metade = idsDaColuna(col).length > 0;
+  const { cel, el, divisa } = fliperama;
+  const metade = idsDaCelula(cel).length > 0;
   el.classList.toggle('metade', metade);
-  col.el.classList.toggle('fl-inteira', !metade);
+  cel.el.classList.toggle('fl-inteira', !metade);
   divisa.hidden = !metade;
   if (!metade) el.style.flexBasis = ''; // a altura arrastada era da metade
   ajustarTela();
 }
 
-// A aba do fliperama na barra da coluna, igual às dos terminais. Fica ativa
+// A aba do fliperama na barra da célula, igual às dos terminais. Fica ativa
 // (entre colchetes) com o teclado dentro dele.
 function abaDoFliperama() {
   const aba = document.createElement('span');
@@ -2213,6 +2542,18 @@ function abaDoFliperama() {
     ev.preventDefault();
     fecharFliperama();
   });
+  // a aba se arrasta como as dos terminais: quem muda de lugar é o console
+  aba.draggable = true;
+  aba.addEventListener('dragstart', (ev) => {
+    ev.dataTransfer.setData(TIPO_FLIPERAMA, '');
+    ev.dataTransfer.effectAllowed = 'move';
+    arrastandoFliperama = true;
+    aba.classList.add('arrastando');
+  });
+  aba.addEventListener('dragend', () => {
+    limparArrasto();
+    desenharAbas();
+  });
   return aba;
 }
 
@@ -2225,7 +2566,7 @@ async function abrirFliperama(caminho) {
     else fliperama.tela.focus();
     return;
   }
-  sairDoZoom(); // a coluna dele pode estar escondida atrás do zoom de outra
+  sairDoZoom(); // a célula dele pode estar escondida atrás do zoom de outra
   if ($('terminal-area').hidden) alternarTerminal(); // a casa dele estava escondida (Ctrl+J)
 
   const el = pedacoDaMesa('fliperama');
@@ -2244,6 +2585,11 @@ async function abrirFliperama(caminho) {
   const itens = pedacoDaMesa('fl-linha');
   atalhos.append(itens);
   itens.append(
+    // a prateleira é uma gaveta: abre por cima da tela, encostada na direita
+    botaoDaMesa('prateleira', () => {
+      const aberta = el.classList.toggle('prateleira-aberta');
+      if (!aberta) tela.focus();
+    }, 'e'),
     botaoDaMesa('pausar', (ev) => {
       if (!jogo) return;
       const parado = jogo.getStatus() === 'paused';
@@ -2287,14 +2633,14 @@ async function abrirFliperama(caminho) {
   divisa.title = 'Arraste pra mudar a altura';
   divisa.addEventListener('mousedown', arrastarDivisaDaLinha);
 
-  const col = colunaDoFliperama();
-  fliperama = { col, el, divisa, tela, rotulo: rotulo.lastElementChild, prateleira };
-  col.el.append(divisa, el);
+  const cel = celulaDoFliperama();
+  fliperama = { cel, el, divisa, tela, rotulo: rotulo.lastElementChild, prateleira };
+  cel.el.append(divisa, el);
   $('shell-fim').hidden = true;
 
-  // O teclado no fliperama acende a aba dele e a moldura da coluna.
+  // O teclado no fliperama acende a aba dele e a moldura da célula.
   el.addEventListener('focusin', () => {
-    colunaAtiva = col;
+    celulaAtiva = cel;
     desenharAbas();
   });
   el.addEventListener('focusout', () => setTimeout(desenharAbas));
@@ -2306,25 +2652,28 @@ async function abrirFliperama(caminho) {
   atualizarTrilho();
   await encherPrateleira(caminho);
   if (caminho) await rodarJogo(caminho);
-  else tela.focus();
+  else {
+    el.classList.add('prateleira-aberta'); // sem jogo, a escolha já vem à mostra
+    tela.focus();
+  }
 }
 
-// Desliga o aparelho guardando o ponto. A coluna só dele vai embora junto;
-// com terminal em cima, o terminal fica com a coluna inteira.
+// Desliga o aparelho guardando o ponto. A célula só dele vai embora junto;
+// com terminal em cima, o terminal fica com a célula inteira.
 async function fecharFliperama() {
   if (!fliperama) return;
   // As referências saem antes do await: o segundo clique no × (ou o Ctrl+Q
   // junto) via o fliperama nulo no meio do caminho e quebrava por dentro.
-  const { col, el, divisa } = fliperama;
+  const { cel, el, divisa } = fliperama;
   fliperama = null;
   await guardarPonto();
   desligarEmulador();
   el.remove();
   divisa.remove();
-  col.el.classList.remove('fl-inteira');
-  if (!idsDaColuna(col).length) {
-    col.ativo = null;
-    removerColuna(col); // se era a última coluna, ela fica, vazia
+  cel.el.classList.remove('fl-inteira');
+  if (!idsDaCelula(cel).length) {
+    cel.ativo = null;
+    removerCelula(cel); // se era a última célula, ela fica, vazia
   }
   desenharAbas();
   atualizarTrilho();
@@ -2333,11 +2682,11 @@ async function fecharFliperama() {
   if (t && !$('terminal-area').hidden) t.term.focus();
 }
 
-// Arrastar a divisa muda quanto da coluna é do terminal e quanto é do jogo.
+// Arrastar a divisa muda quanto da célula é do terminal e quanto é do jogo.
 function arrastarDivisaDaLinha(evInicio) {
   evInicio.preventDefault();
   if (!fliperama) return;
-  const hCima = fliperama.col.terminaisEl.getBoundingClientRect().height;
+  const hCima = fliperama.cel.terminaisEl.getBoundingClientRect().height;
   const baixo = fliperama.el;
   const hBaixo = baixo.getBoundingClientRect().height;
   const y0 = evInicio.clientY;
@@ -2356,10 +2705,11 @@ function arrastarDivisaDaLinha(evInicio) {
 }
 
 // A tela cresce até o limite do espaço mantendo o formato do console (4:3,
-// 10:9…). Em pé ela segue a largura da coluna, deitada segue a altura da
-// metade, e nos dois casos o outro lado para em 60%, pra prateleira e os
-// atalhos não serem engolidos. É feito aqui, e não no CSS, porque o emulador
-// escreve tamanho fixo no próprio canvas e o espaço muda de forma.
+// 10:9…). Em pé ela toma a caixa do jogo inteira (a prateleira virou gaveta
+// e não ocupa mais lugar); deitada segue a altura da metade, com a largura
+// parando em 60% pros atalhos não serem engolidos. É feito aqui, e não no
+// CSS, porque o emulador escreve tamanho fixo no próprio canvas e o espaço
+// muda de forma.
 function ajustarTela() {
   if (!fliperama) return;
   const { el, tela } = fliperama;
@@ -2372,7 +2722,8 @@ function ajustarTela() {
     escala = Math.min(altura / h, (el.clientWidth * 0.6) / w);
   } else {
     const largura = caixa.clientWidth - parseFloat(estilo.paddingLeft) - parseFloat(estilo.paddingRight);
-    escala = Math.min(largura / w, (el.clientHeight * 0.6) / h);
+    const altura = caixa.clientHeight - parseFloat(estilo.paddingTop) - parseFloat(estilo.paddingBottom);
+    escala = Math.min(largura / w, altura / h);
   }
   tela.style.setProperty('width', Math.max(0, Math.floor(w * escala)) + 'px', 'important');
   tela.style.setProperty('height', Math.max(0, Math.floor(h * escala)) + 'px', 'important');
@@ -2406,6 +2757,7 @@ const nomeDoJogo = (caminho) => caminho ? caminho.slice(caminho.lastIndexOf('/')
 // Troca a fita do aparelho que já está na tela.
 async function rodarJogo(caminho) {
   const { tela, rotulo, prateleira } = fliperama;
+  fliperama.el.classList.remove('prateleira-aberta'); // escolheu: a gaveta fecha
   for (const b of prateleira.querySelectorAll('.mesa-jogo')) b.classList.toggle('tocando', b.caminho === caminho);
   if (jogo) {
     await guardarPonto(); // trocar de jogo também não perde o de antes
@@ -2570,7 +2922,8 @@ async function abrirArquivo(caminho) {
       theme: 'vs-dark',
       automaticLayout: true,
       fontSize: 14,
-      minimap: { enabled: false },
+      minimap: { enabled: true }, // a miniatura do código na borda direita, igual ao VS Code
+      wordWrap: 'on', // linha comprida quebra na borda, sem rolagem horizontal
     });
     // Ctrl+S grava na hora, pro costume não atrapalhar — mas nem precisa:
     // toda mudança já salva sozinha. Forçado: grava mesmo se mudou por fora.
@@ -2768,10 +3121,13 @@ $('divisor').addEventListener('mousedown', (evInicio) => {
   const area = $('editor-area');
   const larguraInicio = area.getBoundingClientRect().width;
   const xInicio = evInicio.clientX;
+  // o arquivo cresce até onde o terminal ainda fica com os 200px dele,
+  // senão a divisa some da tela e não tem como puxar de volta
+  const maior = larguraInicio + $('terminal-area').getBoundingClientRect().width - 200;
 
   function mover(ev) {
     const nova = larguraInicio + (ev.clientX - xInicio);
-    area.style.width = Math.max(200, nova) + 'px';
+    area.style.width = Math.max(200, Math.min(nova, maior)) + 'px';
   }
   function soltar() {
     window.removeEventListener('mousemove', mover);
