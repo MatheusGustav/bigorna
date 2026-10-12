@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, net, nativeImage, shell: sistema } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, net, nativeImage, clipboard, shell: sistema } = require('electron');
 const os = require('os');
 const path = require('path');
 const fs = require('fs/promises');
@@ -813,6 +813,13 @@ ipcMain.on('acao:abrir-com', (_ev, programa, caminho) => {
     soltar('gio', ['launch', programa, caminho]);
   }
 });
+
+// A área de transferência do Ctrl+Shift+C/V do terminal. Mora aqui porque o
+// preload, com o sandbox ligado, não recebe o módulo clipboard do Electron.
+ipcMain.on('clip:escrever', (_ev, texto) => {
+  if (typeof texto === 'string') clipboard.writeText(texto);
+});
+ipcMain.handle('clip:ler', () => clipboard.readText());
 
 // Link escrito no terminal, aberto com Ctrl+clique: vai pro navegador do
 // sistema. Só http e https — file:// e outros esquemas não saem daqui.

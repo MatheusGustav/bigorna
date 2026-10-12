@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, clipboard, webUtils } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   // terminais (um por aba; o id vem da janela)
@@ -69,9 +69,10 @@ contextBridge.exposeInMainWorld('api', {
   transcrever: (caminho) => ipcRenderer.send('acao:transcrever', caminho),
   propriedades: (caminho) => ipcRenderer.send('acao:propriedades', caminho),
 
-  // área de transferência (pro Ctrl+Shift+C/V do terminal, igual ao Konsole)
-  copiar: (texto) => clipboard.writeText(texto),
-  // async de propósito: a tela faz .then() — sem a promessa, o Ctrl+Shift+V
-  // quebrava com "erro interno" e não colava nada
-  colar: async () => clipboard.readText(),
+  // área de transferência (pro Ctrl+Shift+C/V do terminal, igual ao Konsole).
+  // Ela mora no processo principal: com o sandbox ligado, o preload não
+  // recebe o módulo clipboard do Electron — vinha undefined e o colar
+  // quebrava com "erro interno".
+  copiar: (texto) => ipcRenderer.send('clip:escrever', texto),
+  colar: () => ipcRenderer.invoke('clip:ler'),
 });
