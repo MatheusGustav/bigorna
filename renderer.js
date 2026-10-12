@@ -1469,6 +1469,78 @@ $('btn-ocultos').addEventListener('click', () => {
   if ($('filtro').value) aplicarFiltro(); // a conta do filtro muda junto
 });
 
+// ---------- a lixeira do sistema, cuidada pela própria Bigorna ----------
+// O botão "lixeira" abre a metade [lixeira]: o que está em
+// ~/.local/share/Trash, o mais novo em cima — sem Dolphin na máquina, é a
+// Bigorna quem mostra, restaura e esvazia. Botão direito num item: restaurar
+// pro caminho de onde veio, ou excluir de vez. Soltar um arrasto na metade
+// manda o item pra lixeira. O vigia de files/ mantém a lista em dia
+// enquanto a metade está aberta.
+
+const pastaDaLixeira = () => casa + '/.local/share/Trash/files';
+
+async function montarLixeira() {
+  const itens = await window.api.lixeiraLista().catch(() => []);
+  $('lixeira-conta').textContent = itens.length ? String(itens.length) : 'vazia';
+  const novas = document.createDocumentFragment();
+  for (const item of itens) {
+    const nome = item.origem.slice(item.origem.lastIndexOf('/') + 1);
+    const el = document.createElement('div');
+    el.className = 'item' + (nome.startsWith('.') ? ' oculto' : '');
+    el.style.paddingLeft = '8px';
+    el.innerHTML = icone(nome, item.ehPasta) + '<span></span>';
+    el.querySelector('span').textContent = nome;
+    el.title = `veio de ${pastaDe(item.origem) || '/'} — ${item.data.replace('T', ' ')}`;
+    el.dados = { naLixeira: item.id, nome }; // sem caminho nem ehPasta: a linha não abre nem recebe soltar
+    novas.appendChild(el);
+  }
+  $('arvore-lixeira').replaceChildren(novas);
+}
+
+$('btn-lixeira').addEventListener('click', () => {
+  const abrir = $('lixeira').hidden;
+  $('lixeira').hidden = !abrir;
+  if (abrir) {
+    montarLixeira();
+    window.api.vigiarPasta(pastaDaLixeira());
+  } else {
+    window.api.desvigiarPasta(pastaDaLixeira());
+  }
+});
+
+$('btn-esvaziar').addEventListener('click', async () => {
+  const r = await window.api.lixeiraEsvaziar().catch(() => ({ erro: 'esvaziar' }));
+  if (r.erro) return avisar('não consegui esvaziar a lixeira');
+  if (!r.cancelado) montarLixeira();
+});
+
+window.api.onPastaMudou((dir) => {
+  if (!$('lixeira').hidden && dir === pastaDaLixeira()) montarLixeira();
+});
+
+function itensDaLixeira(id) {
+  return [
+    {
+      texto: 'Restaurar (volta pra onde estava)',
+      acao: async () => {
+        const r = await window.api.lixeiraRestaurar(id).catch(() => ({ erro: 'restaurar' }));
+        if (r.erro === 'existe') return avisar('já existe um com esse nome no lugar de origem');
+        if (r.erro === 'disco') return avisar('o lugar de origem está noutro disco — não deu');
+        if (r.erro) return avisar('não consegui restaurar');
+        montarLixeira();
+      },
+    },
+    {
+      texto: 'Excluir de vez…',
+      acao: async () => {
+        const r = await window.api.lixeiraExcluir(id).catch(() => ({ erro: 'excluir' }));
+        if (r.erro) return avisar('não consegui excluir');
+        if (!r.cancelado) montarLixeira();
+      },
+    },
+  ];
+}
+
 // ---------- filtro no pé da lateral ----------
 // Digitar esconde o que não casa com o texto, nas duas metades. Pasta
 // aberta fica à mostra se algum filho casar; pasta fechada só pelo nome
@@ -1520,11 +1592,13 @@ $('filtro').addEventListener('keydown', (ev) => {
 let alvoDeSoltar = null; // o que está aceso debaixo do arrasto
 
 // Em que pasta o soltar cairia: numa linha de pasta, nela; no vazio da
-// árvore, na raiz da metade (casa ou a base do [fora]). Linha de arquivo
-// não recebe, senão todo canto viraria alvo e o mover sairia sem querer.
+// árvore, na raiz da metade (casa ou a base do [fora]); na metade da
+// lixeira, vira "mover pra lixeira". Linha de arquivo não recebe, senão
+// todo canto viraria alvo e o mover sairia sem querer.
 function pastaDoSoltar(ev) {
+  if (ev.target.closest('#lixeira')) return { el: $('arvore-lixeira'), praLixeira: true };
   const linha = ev.target.closest('.item');
-  if (linha) return linha.dados?.ehPasta ? { el: linha, pasta: linha.dados.caminho } : null;
+  if (linha) return linha.dados?.ehPasta && linha.dados.caminho ? { el: linha, pasta: linha.dados.caminho } : null;
   if (ev.target.id !== 'arvore' && ev.target.id !== 'arvore-fora') return null;
   const raiz = ev.target.id === 'arvore' ? casa
     : [...pastasLidas].find(([, dados]) => dados.recipiente === ev.target && dados.nivel === 0)?.[0];
@@ -1557,6 +1631,11 @@ $('lateral').addEventListener('drop', async (ev) => {
   if (!alvo || !origem) return;
   ev.preventDefault();
   ev.stopPropagation();
+  if (alvo.praLixeira) {
+    const r = await window.api.lixeira(origem).catch(() => ({ erro: 'lixeira' }));
+    if (r && r.erro) avisar('não consegui mover pra lixeira');
+    return; // a lista da lixeira se refaz pelo vigia de files/
+  }
   const r = await window.api.mover(origem, alvo.pasta).catch(() => ({ erro: 'mover' }));
   if (r.erro === 'mesmo') return; // soltou onde já estava: nada a fazer
   if (r.erro === 'existe') return avisar('já existe um com esse nome aí dentro');
@@ -1731,6 +1810,13 @@ $('lateral').addEventListener('contextmenu', async (ev) => {
   if (!linha || !linha.dados || linha.querySelector('input')) return;
   ev.preventDefault();
   fecharMenu();
+  // item da lixeira tem menu próprio: restaurar ou sumir de vez
+  if (linha.dados.naLixeira) {
+    linha.classList.add('alvo-do-menu');
+    menuAberto = { raiz: desenharMenu(itensDaLixeira(linha.dados.naLixeira), true), sub: null };
+    posicionar(menuAberto.raiz, ev.clientX, ev.clientY);
+    return;
+  }
   const pedido = pedidosDeMenu;
   linha.classList.add('alvo-do-menu');
   const opcoes = await window.api.opcoesDoMenu(linha.dados.caminho, linha.dados.ehPasta);

@@ -190,6 +190,10 @@ button { font: inherit; }
 #arvore-fora { padding-top: 3px; }
 #fora[hidden] { display: none; }
 #fora-nome { text-transform: lowercase; }
+/* a metade da lixeira segue o desenho da metade de fora */
+#lixeira { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--borda-2); margin-top: 10px; padding-top: 9px; }
+#lixeira[hidden] { display: none; }
+#arvore-lixeira { flex: 1; min-height: 0; overflow-y: auto; padding: 3px 0 12px; user-select: none; }
 
 .item {
   display: flex;
@@ -204,7 +208,7 @@ button { font: inherit; }
 .item.alvo-do-menu { background: #2e2e2e; }      /* clicado com o botão direito */
 /* o alvo aceso debaixo de um arrasto: é ali que o soltar vai cair */
 .item.alvo-de-soltar { background: #2e2e2e; outline: 1px solid var(--texto-fraco); outline-offset: -1px; }
-#arvore.alvo-de-soltar, #arvore-fora.alvo-de-soltar { outline: 1px solid var(--texto-fraco); outline-offset: -1px; }
+#arvore.alvo-de-soltar, #arvore-fora.alvo-de-soltar, #arvore-lixeira.alvo-de-soltar { outline: 1px solid var(--texto-fraco); outline-offset: -1px; }
 .caixa-nome {                                    /* renomear e criar novo */
   flex: 1;
   min-width: 0;

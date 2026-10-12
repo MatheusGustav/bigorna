@@ -863,6 +863,90 @@ ipcMain.handle('fs:trash', async (_ev, caminho) => {
   return { ok: true };
 });
 
+// ---------- Lixeira (a do sistema, ~/.local/share/Trash) ----------
+// O trashItem de cima segue o padrão freedesktop: o item vai pra files/ e um
+// .trashinfo em info/ guarda o caminho original (percent-encoded) e a hora.
+// Sem Dolphin na máquina, é a Bigorna quem lê e desfaz isso.
+const LIXEIRA = path.join(os.homedir(), '.local/share/Trash');
+const metaDaLixeira = (id) => path.join(LIXEIRA, 'info', id + '.trashinfo');
+
+ipcMain.handle('lixeira:lista', async () => {
+  const nomes = await fs.readdir(path.join(LIXEIRA, 'info')).catch(() => []);
+  const itens = [];
+  for (const nome of nomes) {
+    if (!nome.endsWith('.trashinfo')) continue;
+    const id = nome.slice(0, -'.trashinfo'.length);
+    const texto = await fs.readFile(path.join(LIXEIRA, 'info', nome), 'utf8').catch(() => '');
+    const origem = texto.match(/^Path=(.+)$/m);
+    const stat = await fs.lstat(path.join(LIXEIRA, 'files', id)).catch(() => null);
+    if (!origem || !stat) continue; // meta órfã (ou arquivo órfão): não aparece
+    let caminho = origem[1];
+    try { caminho = decodeURIComponent(caminho); } catch { /* fica como veio */ }
+    const data = texto.match(/^DeletionDate=(.+)$/m);
+    itens.push({ id, origem: caminho, data: data ? data[1] : '', ehPasta: stat.isDirectory() });
+  }
+  itens.sort((a, b) => b.data.localeCompare(a.data)); // o mais novo em cima
+  return itens;
+});
+
+ipcMain.handle('lixeira:restaurar', async (_ev, id) => {
+  if (typeof id !== 'string' || !id || id.includes('/')) return { erro: 'id' };
+  const texto = await fs.readFile(metaDaLixeira(id), 'utf8').catch(() => null);
+  const achado = texto && texto.match(/^Path=(.+)$/m);
+  if (!achado) return { erro: 'meta' };
+  let destino = achado[1];
+  try { destino = decodeURIComponent(destino); } catch { /* fica como veio */ }
+  if (!path.isAbsolute(destino)) return { erro: 'meta' };
+  if (await fs.access(destino).then(() => true, () => false)) return { erro: 'existe' };
+  await fs.mkdir(path.dirname(destino), { recursive: true }).catch(() => {}); // a pasta de origem pode ter ido junto
+  try {
+    await fs.rename(path.join(LIXEIRA, 'files', id), destino);
+  } catch (e) {
+    return { erro: e.code === 'EXDEV' ? 'disco' : 'restaurar' };
+  }
+  await fs.rm(metaDaLixeira(id), { force: true });
+  return { caminho: destino };
+});
+
+ipcMain.handle('lixeira:excluir', async (ev, id) => {
+  if (typeof id !== 'string' || !id || id.includes('/')) return { erro: 'id' };
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(ev.sender), {
+    type: 'warning',
+    title: 'Excluir de vez',
+    message: `Excluir "${id}" de vez?`,
+    detail: 'Some da lixeira sem volta. Não dá pra recuperar.',
+    buttons: ['Excluir', 'Cancelar'],
+    defaultId: 1, // Enter sem querer cancela
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response !== 0) return { cancelado: true };
+  await fs.rm(path.join(LIXEIRA, 'files', id), { recursive: true, force: true });
+  await fs.rm(metaDaLixeira(id), { force: true });
+  return { ok: true };
+});
+
+ipcMain.handle('lixeira:esvaziar', async (ev) => {
+  const nomes = await fs.readdir(path.join(LIXEIRA, 'files')).catch(() => []);
+  if (!nomes.length) return { ok: true }; // já estava vazia
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(ev.sender), {
+    type: 'warning',
+    title: 'Esvaziar a lixeira',
+    message: `Esvaziar a lixeira (${nomes.length} ${nomes.length === 1 ? 'item' : 'itens'})?`,
+    detail: 'Tudo some de vez. Não dá pra recuperar.',
+    buttons: ['Esvaziar', 'Cancelar'],
+    defaultId: 1, // Enter sem querer cancela
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response !== 0) return { cancelado: true };
+  for (const nome of nomes) await fs.rm(path.join(LIXEIRA, 'files', nome), { recursive: true, force: true });
+  for (const nome of await fs.readdir(path.join(LIXEIRA, 'info')).catch(() => [])) {
+    await fs.rm(path.join(LIXEIRA, 'info', nome), { force: true });
+  }
+  return { ok: true };
+});
+
 ipcMain.handle('fs:delete', async (ev, caminho) => {
   if (!podeMexer(caminho)) return { erro: 'caminho' };
   const ehPasta = (await fs.lstat(caminho)).isDirectory();
