@@ -1264,7 +1264,8 @@ function linhaDaArvore(caminho, nome, ehPasta, nivel) {
   el.addEventListener('dragstart', (ev) => {
     ev.preventDefault(); // o arrasto do HTML sai de cena; quem assume é o do sistema
     // um item marcado (Ctrl+clique) leva a seleção inteira junto
-    window.api.arrastarArquivo(selecionados.has(caminho) ? [...selecionados] : caminho);
+    arrastadosDaLateral = selecionados.has(caminho) ? [...selecionados] : [caminho];
+    window.api.arrastarArquivo(arrastadosDaLateral);
   });
   if (selecionados.has(caminho)) el.classList.add('selecionado'); // a marca sobrevive à releitura
   return el;
@@ -1319,6 +1320,17 @@ async function montarPasta(dir, recipiente, nivel) {
   }
   if (geracaoDaPasta.get(dir) !== geracao) return; // outra releitura passou na frente
   window.api.vigiarPasta(dir); // mudou algo nela (até por fora), a lista relê
+  // Ordem manual da pasta (arrastar um arquivo em cima de outro), por nome.
+  // Pastas ficam onde estão (primeiro, por nome); arquivo fora da lista
+  // (chegou depois) fica no fim, na ordem de chegada de sempre.
+  if (ordemDasPastas[dir]) {
+    const lugar = new Map(ordemDasPastas[dir].map((nome, i) => [nome, i]));
+    const pastas = itens.filter((i) => i.isDir);
+    const arquivos = itens.filter((i) => !i.isDir);
+    arquivos.sort((a, b) => (lugar.has(a.name) ? lugar.get(a.name) : Infinity)
+      - (lugar.has(b.name) ? lugar.get(b.name) : Infinity));
+    itens = [...pastas, ...arquivos];
+  }
   const novas = document.createDocumentFragment();
   const reabrir = [];
   for (const { name, isDir } of itens) {
@@ -1619,6 +1631,50 @@ $('filtro').addEventListener('keydown', (ev) => {
 
 let alvoDeSoltar = null; // o que está aceso debaixo do arrasto
 
+// O que está saindo da lateral agora. O soltar devia trazer os arquivos de
+// volta no dataTransfer, mas no Linux (Wayland) o arrasto nascido na própria
+// janela pode chegar vazio — como foi a Bigorna que começou, ela lembra
+// sozinha. Some no soltar; arrasto que morreu fora, no próximo mexer do mouse.
+let arrastadosDaLateral = null;
+window.addEventListener('mousemove', () => {
+  if (arrastadosDaLateral) arrastadosDaLateral = null;
+});
+
+// Soltar um ARQUIVO em cima de outro arquivo da mesma pasta não move: muda a
+// ordem — ele entra antes (metade de cima) ou depois (metade de baixo) do
+// alvo, e a ordem fica guardada no caderninho, por pasta. Só vale pro
+// arrasto nascido na própria lateral, com todo mundo filho da mesma pasta.
+const ordemDasPastas = {}; // pasta → [nomes de arquivo, na ordem escolhida]
+
+function alvoDeOrdem(ev) {
+  if (!arrastadosDaLateral) return null;
+  const linha = ev.target.closest('.item');
+  if (!linha || !linha.dados?.caminho || linha.dados.ehPasta) return null;
+  const pasta = pastaDe(linha.dados.caminho);
+  const soOsDaMesma = arrastadosDaLateral.every((c) =>
+    pastaDe(c) === pasta && c !== linha.dados.caminho);
+  if (!soOsDaMesma) return null;
+  const r = linha.getBoundingClientRect();
+  return { pasta, alvoNome: linha.dados.nome, antesDe: ev.clientY < r.y + r.height / 2, r };
+}
+
+function reordenarNaPasta(pasta, movidos, alvoNome, antesDe) {
+  const lida = pastasLidas.get(pasta);
+  if (!lida) return;
+  // a ordem de agora sai da própria tela; os movidos saem e entram no lugar
+  const nomes = [...lida.recipiente.children]
+    .filter((el) => el.dados && !el.dados.ehPasta)
+    .map((el) => el.dados.nome);
+  const soltos = movidos.map((c) => c.slice(c.lastIndexOf('/') + 1));
+  const ficam = nomes.filter((n) => !soltos.includes(n));
+  const i = ficam.indexOf(alvoNome);
+  if (i < 0) return;
+  ficam.splice(antesDe ? i : i + 1, 0, ...soltos);
+  ordemDasPastas[pasta] = ficam;
+  guardarAjuste('ordem', ordemDasPastas);
+  recarregarPasta(pasta);
+}
+
 // Em que pasta o soltar cairia: numa linha de pasta, nela; no vazio da
 // árvore, na raiz da metade (casa ou a base do [fora]); na metade da
 // lixeira, vira "mover pra lixeira". Linha de arquivo não recebe, senão
@@ -1635,6 +1691,17 @@ function pastaDoSoltar(ev) {
 
 $('lateral').addEventListener('dragover', (ev) => {
   if (!ev.dataTransfer.types.includes('Files')) return;
+  // em cima de um arquivo irmão: é reordem — um traço mostra onde entra
+  const ordem = alvoDeOrdem(ev);
+  if (ordem) {
+    if (alvoDeSoltar) alvoDeSoltar.classList.remove('alvo-de-soltar');
+    alvoDeSoltar = null;
+    mostrarSombra(ordem.r.x, (ordem.antesDe ? ordem.r.y : ordem.r.bottom) - 1, ordem.r.width, 2);
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'move';
+    return;
+  }
+  $('sombra-de-soltar').hidden = true;
   const alvo = pastaDoSoltar(ev);
   if (alvoDeSoltar && alvoDeSoltar !== alvo?.el) alvoDeSoltar.classList.remove('alvo-de-soltar');
   alvoDeSoltar = alvo ? alvo.el : null;
@@ -1648,13 +1715,31 @@ $('lateral').addEventListener('dragleave', (ev) => {
   if (ev.relatedTarget && $('lateral').contains(ev.relatedTarget)) return;
   if (alvoDeSoltar) alvoDeSoltar.classList.remove('alvo-de-soltar');
   alvoDeSoltar = null;
+  $('sombra-de-soltar').hidden = true;
 });
 
 $('lateral').addEventListener('drop', async (ev) => {
   if (alvoDeSoltar) alvoDeSoltar.classList.remove('alvo-de-soltar');
   alvoDeSoltar = null;
+  $('sombra-de-soltar').hidden = true;
+
+  // reordem: entra antes ou depois do arquivo alvo, sem mover de pasta
+  const ordem = alvoDeOrdem(ev);
+  if (ordem) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    reordenarNaPasta(ordem.pasta, arrastadosDaLateral, ordem.alvoNome, ordem.antesDe);
+    arrastadosDaLateral = null;
+    limparSelecao();
+    return;
+  }
+
   const alvo = pastaDoSoltar(ev);
-  const origens = [...ev.dataTransfer.files].map((f) => window.api.caminhoDoArquivo(f)).filter(Boolean);
+  // o dataTransfer devia trazer os arquivos, mas no arrasto nascido aqui
+  // dentro ele pode chegar vazio (Wayland): aí vale o que a lateral lembra
+  const trazidos = [...ev.dataTransfer.files].map((f) => window.api.caminhoDoArquivo(f)).filter(Boolean);
+  const origens = trazidos.length ? trazidos : arrastadosDaLateral || [];
+  arrastadosDaLateral = null;
   if (!alvo || !origens.length) return;
   ev.preventDefault();
   ev.stopPropagation();
@@ -1713,18 +1798,21 @@ $('terminal-area').addEventListener('dragover', (ev) => {
 // "true": pega o soltar antes da caixa de texto escondida do xterm, que
 // escreveria o caminho uma segunda vez.
 $('terminal-area').addEventListener('drop', (ev) => {
-  const solto = ev.dataTransfer.files[0];
-  const caminho = solto ? window.api.caminhoDoArquivo(solto) : null;
+  // o dataTransfer devia trazer os arquivos, mas no arrasto nascido na
+  // própria lateral ele pode chegar vazio (Wayland): aí vale o que ela lembra
+  const trazidos = [...ev.dataTransfer.files].map((f) => window.api.caminhoDoArquivo(f)).filter(Boolean);
+  const caminhos = trazidos.length ? trazidos : arrastadosDaLateral || [];
+  arrastadosDaLateral = null;
   // o caminho vai pro terminal da célula onde o mouse soltou
   const celEl = ev.target.closest('.celula');
   const cel = todasAsCelulas().find((c) => c.el === celEl) || celulaAtiva;
   const t = (cel && terminais.get(cel.ativo)) || terminalDaVez();
-  if (!caminho || !t) return;
+  if (!caminhos.length || !t) return;
   ev.preventDefault();
   ev.stopPropagation();
   // paste e não ptyWrite: se o programa aberto pediu "colagem marcada" (o bash
   // e o Claude Code pedem), ele recebe como colagem e não executa nada sozinho.
-  t.term.paste(caminhoProBash(caminho) + ' ');
+  t.term.paste(caminhos.map(caminhoProBash).join(' ') + ' ');
   t.term.focus();
   if (cel && terminalAtivo !== cel.ativo) {
     terminalAtivo = cel.ativo;
@@ -3158,6 +3246,7 @@ $('divisor').addEventListener('dblclick', () => {
     $('lateral').classList.add('sem-ocultos');
     $('btn-ocultos').classList.add('riscado');
   }
+  Object.assign(ordemDasPastas, ajustes.ordem || {}); // a ordem manual de cada pasta volta
 
   pastaPedida = await window.api.pastaPedida();
   const arquivo = await window.api.arquivoPedido();
