@@ -418,12 +418,16 @@ function mostrarEmbaixo(id) {
 // A aba se arrasta: solta na barra de outra célula muda de célula (e de
 // posição na fila), solta no meio de um terminal vai pra célula dele, solta
 // na beirada esquerda ou direita de um terminal vira uma coluna nova ali, e
-// na beirada de cima ou de baixo vira uma célula nova naquela coluna.
+// na beirada de cima ou de baixo vira uma célula nova naquela coluna. A aba
+// do fliperama se arrasta igual — só não entra na fila, porque ela mora
+// sempre no fim da barra.
 
 const TIPO_ABA = 'application/x-bigorna-aba';
 const TIPO_COLUNA = 'application/x-bigorna-coluna';
+const TIPO_FLIPERAMA = 'application/x-bigorna-fliperama';
 let arrastandoAba = null; // id do terminal da aba arrastada
 let arrastandoColuna = null; // a coluna arrastada pela parte vazia da barra
+let arrastandoFliperama = false; // a aba do fliperama na mão do mouse
 let soltarEm = null; // alvo da vez: { cel, antesDe } na barra, { cel, zona } no terminal, { colAlvo, zonaDaColuna } de coluna
 
 // Muda o terminal de lugar na fila (a ordem do Map é a ordem das abas).
@@ -444,6 +448,7 @@ function reordenarTerminal(id, antesDe) {
 function limparArrasto() {
   arrastandoAba = null;
   arrastandoColuna = null;
+  arrastandoFliperama = false;
   soltarEm = null;
   $('sombra-de-soltar').hidden = true;
   for (const el of $('colunas').querySelectorAll('.arrastando')) el.classList.remove('arrastando');
@@ -536,7 +541,8 @@ function sombraDaZona(zona, rCaixa, rLinha) {
 
 $('colunas').addEventListener('dragover', (ev) => {
   const ehColuna = ev.dataTransfer.types.includes(TIPO_COLUNA);
-  if (!ehColuna && !ev.dataTransfer.types.includes(TIPO_ABA)) return;
+  const ehFliperama = ev.dataTransfer.types.includes(TIPO_FLIPERAMA);
+  if (!ehColuna && !ehFliperama && !ev.dataTransfer.types.includes(TIPO_ABA)) return;
 
   // coluna arrastada: o meio de outra coluna troca as duas, as beiradas dos
   // lados inserem ali, e cima/baixo viram uma linha nova (vale até nela mesma,
@@ -568,7 +574,7 @@ $('colunas').addEventListener('dragover', (ev) => {
   ev.dataTransfer.dropEffect = 'move';
 
   const barra = ev.target.closest('.abas');
-  if (barra) {
+  if (barra && !ehFliperama) {
     // na barra: a aba entra antes da aba sob o mouse (metade direita: depois)
     const abas = [...barra.querySelectorAll('.aba')];
     const aba = ev.target.closest('.aba');
@@ -597,15 +603,16 @@ $('colunas').addEventListener('dragover', (ev) => {
   }
 
   // no terminal: beirada esquerda ou direita cria coluna, cima ou baixo cria
-  // célula empilhada na coluna, e o meio só muda de célula
+  // célula empilhada na coluna, e o meio só muda de célula. O fliperama em
+  // cima de uma barra também vale como o meio: ele não tem posição na fila.
   const r = cel.terminaisEl.getBoundingClientRect();
-  const zona = zonaDoPonto(ev, r);
+  const zona = barra ? 'meio' : zonaDoPonto(ev, r);
   soltarEm = { cel, zona };
   sombraDaZona(zona, r);
 });
 
 $('colunas').addEventListener('dragleave', (ev) => {
-  if (arrastandoAba === null && arrastandoColuna === null) return;
+  if (arrastandoAba === null && arrastandoColuna === null && !arrastandoFliperama) return;
   if (ev.relatedTarget && $('colunas').contains(ev.relatedTarget)) return;
   soltarEm = null;
   $('sombra-de-soltar').hidden = true;
@@ -613,7 +620,8 @@ $('colunas').addEventListener('dragleave', (ev) => {
 
 $('colunas').addEventListener('drop', (ev) => {
   const ehColuna = ev.dataTransfer.types.includes(TIPO_COLUNA);
-  if (!ehColuna && !ev.dataTransfer.types.includes(TIPO_ABA)) return;
+  const ehFliperama = ev.dataTransfer.types.includes(TIPO_FLIPERAMA);
+  if (!ehColuna && !ehFliperama && !ev.dataTransfer.types.includes(TIPO_ABA)) return;
   ev.preventDefault();
   ev.stopPropagation();
   const id = Number(ev.dataTransfer.getData(TIPO_ABA));
@@ -621,6 +629,35 @@ $('colunas').addEventListener('drop', (ev) => {
   const colArrastada = arrastandoColuna;
   limparArrasto();
   if (!alvo) return;
+
+  // o fliperama solto segue as mesmas zonas da aba de terminal, só que quem
+  // muda de lugar é o console — e sem posição na fila (barra vale meio)
+  if (ehFliperama) {
+    if (!fliperama || !alvo.cel) return;
+    const sozinho = !idsDaCelula(fliperama.cel).length; // a célula era só do jogo
+    if (alvo.zona === 'cima' || alvo.zona === 'baixo') {
+      const col = colunaDe(alvo.cel);
+      const indice = col.celulas.indexOf(alvo.cel) + (alvo.zona === 'baixo' ? 1 : 0);
+      if (sozinho && colunaDe(fliperama.cel) === col) {
+        const iOrigem = col.celulas.indexOf(fliperama.cel);
+        if (indice === iOrigem || indice === iOrigem + 1) return;
+      }
+      moverFliperama(criarCelulaEm(col, indice));
+    } else if (alvo.zona === 'esquerda' || alvo.zona === 'direita') {
+      const colAlvo = colunaDe(alvo.cel);
+      const linha = linhaDe(colAlvo);
+      const indice = linha.colunas.indexOf(colAlvo) + (alvo.zona === 'direita' ? 1 : 0);
+      const colDoJogo = colunaDe(fliperama.cel);
+      if (sozinho && colDoJogo.celulas.length === 1 && linhaDe(colDoJogo) === linha) {
+        const iOrigem = linha.colunas.indexOf(colDoJogo);
+        if (indice === iOrigem || indice === iOrigem + 1) return;
+      }
+      moverFliperama(criarColunaEm(linha, indice));
+    } else {
+      moverFliperama(alvo.cel); // meio (ou a barra): só muda de célula
+    }
+    return;
+  }
 
   if (ehColuna) {
     if (!colArrastada || !alvo.colAlvo) return;
@@ -1027,7 +1064,7 @@ function abaDoTerminal(id) {
 function desenharAbas() {
   // redesenhar com a caixa de renomear aberta apagaria o que está sendo
   // digitado; no meio de um arrasto, sumiria com a aba da mão do mouse
-  if ($('colunas').querySelector('.abas input') || arrastandoAba !== null) return;
+  if ($('colunas').querySelector('.abas input') || arrastandoAba !== null || arrastandoFliperama) return;
 
   for (const cel of todasAsCelulas()) {
     cel.el.classList.toggle('foco', cel === celulaAtiva);
@@ -2250,6 +2287,23 @@ function celulaDoFliperama() {
   return criarColunaNoFim();
 }
 
+// Leva o console pra outra célula (o arrasto da aba dele). A célula que era
+// só do jogo vai embora junto, igual à de um terminal que se mudou.
+function moverFliperama(cel) {
+  if (!fliperama || !cel || fliperama.cel === cel) return;
+  sairDoZoom();
+  const origem = fliperama.cel;
+  fliperama.cel = cel;
+  origem.el.classList.remove('fl-inteira');
+  cel.el.append(fliperama.divisa, fliperama.el);
+  if (!idsDaCelula(origem).length) {
+    origem.ativo = null;
+    removerCelula(origem);
+  }
+  desenharAbas(); // a aba muda de barra, e o jogo se arruma em pé ou deitado
+  fliperama.tela.focus();
+}
+
 // Em pé ou deitado, conforme a célula tenha ou não terminal. Chamado pelo
 // desenharAbas, que já roda a cada mudança de terminal ou de célula.
 function arrumarFliperama() {
@@ -2289,6 +2343,18 @@ function abaDoFliperama() {
     if (ev.button !== 1) return;
     ev.preventDefault();
     fecharFliperama();
+  });
+  // a aba se arrasta como as dos terminais: quem muda de lugar é o console
+  aba.draggable = true;
+  aba.addEventListener('dragstart', (ev) => {
+    ev.dataTransfer.setData(TIPO_FLIPERAMA, '');
+    ev.dataTransfer.effectAllowed = 'move';
+    arrastandoFliperama = true;
+    aba.classList.add('arrastando');
+  });
+  aba.addEventListener('dragend', () => {
+    limparArrasto();
+    desenharAbas();
   });
   return aba;
 }
